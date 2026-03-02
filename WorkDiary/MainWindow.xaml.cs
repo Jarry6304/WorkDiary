@@ -4,23 +4,44 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
+using System.Windows.Threading;
+using WorkDiary.Data;
+using WorkDiary.Models;
+using WorkDiary.Services;
 
 namespace WorkDiary;
 
 public partial class MainWindow : Window
 {
-    // ── 暫存資料（Phase 1 純記憶體；Phase 2 改為 SQLite）──
-    private readonly Dictionary<DateTime, string> _textEntries = new();
-    private readonly Dictionary<DateTime, List<AttachmentItem>> _attachmentEntries = new();
+    // ── 服務層 ──
+    private readonly AppDbContext  _db;
+    private readonly DiaryService  _diaryService;
+    private readonly FileService   _fileService;
+
+    // ── 目前顯示的日期 ──
     private DateTime _currentDate = DateTime.Today;
 
-    // ── 浮動月曆視窗（建立一次，重複顯示/隱藏）──
+    // ── 自動儲存防抖（2 秒無輸入後存入 SQLite）──
+    private readonly DispatcherTimer _autoSaveTimer;
+
+    // ── 浮動月曆視窗 ──
     private readonly FloatingCalendarWindow _calendarWindow;
 
     public MainWindow()
     {
         InitializeComponent();
 
+        // 初始化 SQLite（首次執行自動建表）
+        _db = new AppDbContext();
+        _db.Database.EnsureCreated();
+        _diaryService = new DiaryService(_db);
+        _fileService  = new FileService();
+
+        // 自動儲存計時器
+        _autoSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _autoSaveTimer.Tick += AutoSaveTimer_Tick;
+
+        // 浮動月曆
         _calendarWindow = new FloatingCalendarWindow();
         _calendarWindow.SetSelectedDate(DateTime.Today);
         _calendarWindow.DateSelected += OnCalendarDateSelected;
@@ -28,6 +49,9 @@ public partial class MainWindow : Window
         UpdateCalendarButton(DateTime.Today);
         UpdateDateHeader(DateTime.Today);
         UpdatePlaceholderVisibility();
+
+        // 視窗顯示後載入今日記錄
+        Loaded += async (_, _) => await LoadEntryForDateAsync(_currentDate);
     }
 
     // ════════════════════════════════════════
@@ -42,23 +66,24 @@ public partial class MainWindow : Window
             return;
         }
 
-        // 定位浮動視窗：出現在按鈕正下方
         var btnPos = CalendarToggleButton.PointToScreen(
             new Point(0, CalendarToggleButton.ActualHeight + 4));
-
         _calendarWindow.Left = btnPos.X;
         _calendarWindow.Top  = btnPos.Y;
         _calendarWindow.Show();
     }
 
-    // ── 浮動月曆選取日期回呼 ──
-    private void OnCalendarDateSelected(DateTime date)
+    // 浮動月曆選取日期後的回呼（async void：WPF 事件處理允許）
+    private async void OnCalendarDateSelected(DateTime date)
     {
-        SaveCurrentEntry();
+        _autoSaveTimer.Stop();
+        await _diaryService.SaveContentAsync(_currentDate, GetEditorText());
+
         _currentDate = date;
-        LoadEntryForDate(_currentDate);
-        UpdateDateHeader(_currentDate);
-        UpdateCalendarButton(_currentDate);
+        _calendarWindow.SetSelectedDate(date);
+        UpdateCalendarButton(date);
+        UpdateDateHeader(date);
+        await LoadEntryForDateAsync(date);
     }
 
     private void UpdateCalendarButton(DateTime date)
@@ -72,9 +97,8 @@ public partial class MainWindow : Window
 
     private void UpdateDateHeader(DateTime date)
     {
-        var isToday  = date.Date == DateTime.Today;
         var dayLabel = GetChineseDayOfWeek(date.DayOfWeek);
-        DateHeaderText.Text = isToday
+        DateHeaderText.Text = date.Date == DateTime.Today
             ? $"{date:yyyy年M月d日}　{dayLabel}　（今天）"
             : $"{date:yyyy年M月d日}　{dayLabel}";
     }
@@ -92,22 +116,19 @@ public partial class MainWindow : Window
     };
 
     // ════════════════════════════════════════
-    // 記憶體存取
+    // DB 存取
     // ════════════════════════════════════════
 
-    private void SaveCurrentEntry()
+    private async Task LoadEntryForDateAsync(DateTime date)
     {
-        _textEntries[_currentDate] = GetEditorText();
-    }
+        var entry = await _diaryService.GetEntryAsync(date);
+        SetEditorText(entry?.Content ?? string.Empty);
 
-    private void LoadEntryForDate(DateTime date)
-    {
-        SetEditorText(_textEntries.GetValueOrDefault(date, string.Empty));
-
-        var attachments = _attachmentEntries.GetValueOrDefault(date);
-        if (attachments is { Count: > 0 })
+        if (entry?.Attachments is { Count: > 0 })
         {
-            AttachmentListView.ItemsSource = new List<AttachmentItem>(attachments);
+            AttachmentListView.ItemsSource = entry.Attachments
+                .Select(MapToDisplayItem)
+                .ToList();
             ShowAttachmentList();
         }
         else
@@ -117,15 +138,23 @@ public partial class MainWindow : Window
         }
     }
 
-    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    private async void AutoSaveTimer_Tick(object? sender, EventArgs e)
     {
-        SaveCurrentEntry();
+        _autoSaveTimer.Stop();
+        await _diaryService.SaveContentAsync(_currentDate, GetEditorText());
+    }
+
+    protected override async void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        _autoSaveTimer.Stop();
+        await _diaryService.SaveContentAsync(_currentDate, GetEditorText());
         _calendarWindow.Close();
+        _db.Dispose();
         base.OnClosing(e);
     }
 
     // ════════════════════════════════════════
-    // RichTextBox 輔助方法
+    // RichTextBox 輔助
     // ════════════════════════════════════════
 
     private string GetEditorText()
@@ -147,6 +176,9 @@ public partial class MainWindow : Window
     private void DiaryRichTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         UpdatePlaceholderVisibility();
+        // 重置防抖計時器
+        _autoSaveTimer.Stop();
+        _autoSaveTimer.Start();
     }
 
     private void UpdatePlaceholderVisibility()
@@ -157,18 +189,18 @@ public partial class MainWindow : Window
     }
 
     // ════════════════════════════════════════
-    // 附件清單顯示切換
+    // 附件 UI 切換
     // ════════════════════════════════════════
 
     private void ShowDropHint()
     {
-        DropHint.Visibility = Visibility.Visible;
+        DropHint.Visibility           = Visibility.Visible;
         AttachmentListView.Visibility = Visibility.Collapsed;
     }
 
     private void ShowAttachmentList()
     {
-        DropHint.Visibility = Visibility.Collapsed;
+        DropHint.Visibility           = Visibility.Collapsed;
         AttachmentListView.Visibility = Visibility.Visible;
     }
 
@@ -203,14 +235,14 @@ public partial class MainWindow : Window
         SetDropZoneHighlight(false);
     }
 
-    private void DropZone_Drop(object sender, DragEventArgs e)
+    private async void DropZone_Drop(object sender, DragEventArgs e)
     {
         SetDropZoneHighlight(false);
         if (e.Data.GetDataPresent(DataFormats.FileDrop))
         {
             var files = (string[])e.Data.GetData(DataFormats.FileDrop);
             foreach (var file in files)
-                AddFileToList(file);
+                await AddFileAsync(file);
         }
     }
 
@@ -231,9 +263,9 @@ public partial class MainWindow : Window
     private static readonly HashSet<string> SupportedExtensions =
         new() { ".xlsx", ".xls", ".pdf", ".pptx", ".ppt", ".txt", ".jpg", ".jpeg", ".png" };
 
-    private void AddFileToList(string filePath)
+    private async Task AddFileAsync(string sourcePath)
     {
-        var ext = Path.GetExtension(filePath).ToLowerInvariant();
+        var ext = Path.GetExtension(sourcePath).ToLowerInvariant();
         if (!SupportedExtensions.Contains(ext))
         {
             MessageBox.Show(
@@ -244,31 +276,76 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!_attachmentEntries.ContainsKey(_currentDate))
-            _attachmentEntries[_currentDate] = new List<AttachmentItem>();
-
-        var existing = _attachmentEntries[_currentDate];
-        if (existing.Exists(a => a.FilePath == filePath))
-            return;
-
-        existing.Add(new AttachmentItem
+        try
         {
-            FileName = Path.GetFileName(filePath),
-            FilePath = filePath,
-            Icon     = GetFileIcon(ext),
-            FileSize = GetFileSizeText(filePath)
-        });
+            // 複製到本地儲存資料夾
+            var relativePath = _fileService.CopyToStorage(sourcePath, _currentDate);
 
-        AttachmentListView.ItemsSource = new List<AttachmentItem>(existing);
-        ShowAttachmentList();
+            // 取得或建立 DB 記錄
+            var entry = await _diaryService.GetOrCreateEntryAsync(_currentDate);
+
+            // 避免重複（同 relativePath）
+            if (entry.Attachments.Any(a => a.RelativePath == relativePath))
+                return;
+
+            var info = new FileInfo(sourcePath);
+            await _diaryService.AddAttachmentAsync(new FileAttachment
+            {
+                DiaryEntryId  = entry.Id,
+                FileName      = Path.GetFileName(sourcePath),
+                RelativePath  = relativePath,
+                Extension     = ext,
+                FileSizeBytes = info.Exists ? info.Length : 0,
+                AddedAt       = DateTime.Now
+            });
+
+            // 重新從 DB 載入清單（確保包含最新記錄）
+            await RefreshAttachmentListAsync();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"附件加入失敗：{ex.Message}",
+                "錯誤", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private async Task RefreshAttachmentListAsync()
+    {
+        var entry = await _diaryService.GetEntryAsync(_currentDate);
+        if (entry?.Attachments is { Count: > 0 })
+        {
+            AttachmentListView.ItemsSource = entry.Attachments
+                .Select(MapToDisplayItem)
+                .ToList();
+            ShowAttachmentList();
+        }
+        else
+        {
+            AttachmentListView.ItemsSource = null;
+            ShowDropHint();
+        }
     }
 
     // 雙擊附件 → 系統預設程式開啟
     private void AttachmentListView_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (AttachmentListView.SelectedItem is AttachmentItem item && File.Exists(item.FilePath))
-            Process.Start(new ProcessStartInfo(item.FilePath) { UseShellExecute = true });
+        if (AttachmentListView.SelectedItem is AttachmentItem item)
+        {
+            var fullPath = _fileService.GetFullPath(item.RelativePath);
+            if (File.Exists(fullPath))
+                Process.Start(new ProcessStartInfo(fullPath) { UseShellExecute = true });
+        }
     }
+
+    private AttachmentItem MapToDisplayItem(FileAttachment f) => new()
+    {
+        DbId         = f.Id,
+        FileName     = f.FileName,
+        RelativePath = f.RelativePath,
+        Icon         = GetFileIcon(f.Extension),
+        FileSize     = FormatFileSize(f.FileSizeBytes)
+    };
 
     private static string GetFileIcon(string ext) => ext switch
     {
@@ -280,27 +357,20 @@ public partial class MainWindow : Window
         _                            => "📄"
     };
 
-    private static string GetFileSizeText(string filePath)
+    private static string FormatFileSize(long bytes) => bytes switch
     {
-        try
-        {
-            var size = new FileInfo(filePath).Length;
-            return size switch
-            {
-                < 1_024         => $"{size} B",
-                < 1_048_576     => $"{size / 1024.0:F1} KB",
-                _               => $"{size / 1_048_576.0:F1} MB"
-            };
-        }
-        catch { return string.Empty; }
-    }
+        < 1_024         => $"{bytes} B",
+        < 1_048_576     => $"{bytes / 1024.0:F1} KB",
+        _               => $"{bytes / 1_048_576.0:F1} MB"
+    };
 }
 
-// ── 附件資料模型（Phase 2 搬至 Models 資料夾並加入 DB 欄位）──
+// ── UI 顯示模型（與 DB 模型 FileAttachment 分離）──
 public class AttachmentItem
 {
-    public string FileName { get; set; } = string.Empty;
-    public string FilePath { get; set; } = string.Empty;
-    public string FileSize { get; set; } = string.Empty;
-    public string Icon     { get; set; } = "📄";
+    public int    DbId         { get; set; }
+    public string FileName     { get; set; } = string.Empty;
+    public string RelativePath { get; set; } = string.Empty;
+    public string FileSize     { get; set; } = string.Empty;
+    public string Icon         { get; set; } = "📄";
 }
