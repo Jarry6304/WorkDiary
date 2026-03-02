@@ -7,6 +7,36 @@
         Background="#F0F2F5">
 
     <Window.Resources>
+        <!-- 透明導航按鈕（hover 時顯示灰底）-->
+        <Style x:Key="GhostButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#24292E"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}"
+                                CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#F0F2F5"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="#E1E4E8"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- 藍色強調按鈕樣式 -->
         <Style x:Key="AccentButton" TargetType="Button">
             <Setter Property="Background" Value="#0078D4"/>
@@ -56,16 +86,32 @@
                 BorderBrush="#E1E4E8"
                 BorderThickness="0,0,0,1"
                 Padding="16,10">
-            <DockPanel>
-                <TextBlock Text="📔  WorkDiary"
+            <DockPanel LastChildFill="False">
+                <TextBlock DockPanel.Dock="Left"
+                           Text="📔  WorkDiary"
                            FontSize="18" FontWeight="Bold"
                            Foreground="#0078D4"
                            VerticalAlignment="Center"/>
-                <Button DockPanel.Dock="Right"
-                        x:Name="CalendarToggleButton"
-                        Click="CalendarToggleButton_Click"
-                        Style="{StaticResource AccentButton}"
-                        ToolTip="點擊開啟 / 關閉月曆"/>
+                <StackPanel DockPanel.Dock="Right"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <Button x:Name="PrevDayButton"
+                            Content="◀"
+                            Style="{StaticResource GhostButton}"
+                            Click="PrevDayButton_Click"
+                            ToolTip="前一天"
+                            Margin="0,0,2,0"/>
+                    <Button x:Name="NextDayButton"
+                            Content="▶"
+                            Style="{StaticResource GhostButton}"
+                            Click="NextDayButton_Click"
+                            ToolTip="後一天"
+                            Margin="0,0,8,0"/>
+                    <Button x:Name="CalendarToggleButton"
+                            Click="CalendarToggleButton_Click"
+                            Style="{StaticResource AccentButton}"
+                            ToolTip="點擊開啟 / 關閉月曆"/>
+                </StackPanel>
             </DockPanel>
         </Border>
 
@@ -81,6 +127,7 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>  <!-- 字數統計列 -->
                 </Grid.RowDefinitions>
 
                 <!-- 日期標題列 -->
@@ -124,6 +171,18 @@
                                VerticalAlignment="Top"
                                IsHitTestVisible="False"/>
                 </Grid>
+                <!-- 字數統計列 -->
+                <Border Grid.Row="2"
+                        Background="#FAFAFA"
+                        BorderBrush="#E1E4E8"
+                        BorderThickness="0,1,0,0"
+                        Padding="16,4">
+                    <TextBlock x:Name="WordCountText"
+                               Text=""
+                               Foreground="#9EA3A8"
+                               FontSize="11"
+                               HorizontalAlignment="Right"/>
+                </Border>
             </Grid>
         </Border>
 
@@ -190,7 +249,19 @@
                                   Background="Transparent"
                                   Visibility="Collapsed"
                                   ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                  MouseDoubleClick="AttachmentListView_MouseDoubleClick">
+                                  MouseDoubleClick="AttachmentListView_MouseDoubleClick"
+                                  KeyDown="AttachmentListView_KeyDown">
+                            <ListView.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="開啟檔案"
+                                              Click="AttachmentMenu_Open"/>
+                                    <MenuItem Header="在資料夾中顯示"
+                                              Click="AttachmentMenu_ShowInFolder"/>
+                                    <Separator/>
+                                    <MenuItem Header="刪除附件"
+                                              Click="AttachmentMenu_Delete"/>
+                                </ContextMenu>
+                            </ListView.ContextMenu>
                             <ListView.ItemContainerStyle>
                                 <Style TargetType="ListViewItem">
                                     <Setter Property="HorizontalContentAlignment" Value="Stretch"/>

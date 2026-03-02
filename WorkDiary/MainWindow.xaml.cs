@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using WorkDiary.Data;
@@ -44,7 +45,7 @@ public partial class MainWindow : Window
         // 浮動月曆
         _calendarWindow = new FloatingCalendarWindow();
         _calendarWindow.SetSelectedDate(DateTime.Today);
-        _calendarWindow.DateSelected += OnCalendarDateSelected;
+        _calendarWindow.DateSelected += async date => await NavigateToDateAsync(date);
 
         UpdateCalendarButton(DateTime.Today);
         UpdateDateHeader(DateTime.Today);
@@ -55,7 +56,7 @@ public partial class MainWindow : Window
     }
 
     // ════════════════════════════════════════
-    // 月曆切換按鈕
+    // 日期導航
     // ════════════════════════════════════════
 
     private void CalendarToggleButton_Click(object sender, RoutedEventArgs e)
@@ -73,8 +74,14 @@ public partial class MainWindow : Window
         _calendarWindow.Show();
     }
 
-    // 浮動月曆選取日期後的回呼（async void：WPF 事件處理允許）
-    private async void OnCalendarDateSelected(DateTime date)
+    private async void PrevDayButton_Click(object sender, RoutedEventArgs e)
+        => await NavigateToDateAsync(_currentDate.AddDays(-1));
+
+    private async void NextDayButton_Click(object sender, RoutedEventArgs e)
+        => await NavigateToDateAsync(_currentDate.AddDays(1));
+
+    /// <summary>儲存目前記錄後切換到指定日期。</summary>
+    private async Task NavigateToDateAsync(DateTime date)
     {
         _autoSaveTimer.Stop();
         await _diaryService.SaveContentAsync(_currentDate, GetEditorText());
@@ -171,11 +178,13 @@ public partial class MainWindow : Window
         if (!string.IsNullOrEmpty(text))
             DiaryRichTextBox.Document.Blocks.Add(new Paragraph(new Run(text)));
         UpdatePlaceholderVisibility();
+        UpdateWordCount();
     }
 
     private void DiaryRichTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         UpdatePlaceholderVisibility();
+        UpdateWordCount();
         // 重置防抖計時器
         _autoSaveTimer.Stop();
         _autoSaveTimer.Start();
@@ -186,6 +195,12 @@ public partial class MainWindow : Window
         EditorPlaceholder.Visibility = string.IsNullOrWhiteSpace(GetEditorText())
             ? Visibility.Visible
             : Visibility.Collapsed;
+    }
+
+    private void UpdateWordCount()
+    {
+        var count = GetEditorText().Count(c => !char.IsWhiteSpace(c));
+        WordCountText.Text = count == 0 ? string.Empty : $"{count} 字";
     }
 
     // ════════════════════════════════════════
@@ -257,7 +272,7 @@ public partial class MainWindow : Window
     }
 
     // ════════════════════════════════════════
-    // 附件處理
+    // 附件新增
     // ════════════════════════════════════════
 
     private static readonly HashSet<string> SupportedExtensions =
@@ -278,13 +293,9 @@ public partial class MainWindow : Window
 
         try
         {
-            // 複製到本地儲存資料夾
             var relativePath = _fileService.CopyToStorage(sourcePath, _currentDate);
+            var entry        = await _diaryService.GetOrCreateEntryAsync(_currentDate);
 
-            // 取得或建立 DB 記錄
-            var entry = await _diaryService.GetOrCreateEntryAsync(_currentDate);
-
-            // 避免重複（同 relativePath）
             if (entry.Attachments.Any(a => a.RelativePath == relativePath))
                 return;
 
@@ -299,7 +310,6 @@ public partial class MainWindow : Window
                 AddedAt       = DateTime.Now
             });
 
-            // 重新從 DB 載入清單（確保包含最新記錄）
             await RefreshAttachmentListAsync();
         }
         catch (Exception ex)
@@ -327,16 +337,77 @@ public partial class MainWindow : Window
         }
     }
 
-    // 雙擊附件 → 系統預設程式開啟
-    private void AttachmentListView_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    // ════════════════════════════════════════
+    // 附件操作（開啟 / 顯示 / 刪除）
+    // ════════════════════════════════════════
+
+    // 雙擊開啟
+    private void AttachmentListView_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (AttachmentListView.SelectedItem is AttachmentItem item)
+            OpenAttachment(item);
+    }
+
+    // 右鍵選單：開啟檔案
+    private void AttachmentMenu_Open(object sender, RoutedEventArgs e)
+    {
+        if (AttachmentListView.SelectedItem is AttachmentItem item)
+            OpenAttachment(item);
+    }
+
+    // 右鍵選單：在資料夾中顯示
+    private void AttachmentMenu_ShowInFolder(object sender, RoutedEventArgs e)
     {
         if (AttachmentListView.SelectedItem is AttachmentItem item)
         {
             var fullPath = _fileService.GetFullPath(item.RelativePath);
             if (File.Exists(fullPath))
-                Process.Start(new ProcessStartInfo(fullPath) { UseShellExecute = true });
+                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{fullPath}\"")
+                    { UseShellExecute = true });
         }
     }
+
+    // 右鍵選單：刪除附件
+    private async void AttachmentMenu_Delete(object sender, RoutedEventArgs e)
+    {
+        if (AttachmentListView.SelectedItem is AttachmentItem item)
+            await DeleteAttachmentAsync(item);
+    }
+
+    // Delete 鍵刪除
+    private async void AttachmentListView_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Delete && AttachmentListView.SelectedItem is AttachmentItem item)
+            await DeleteAttachmentAsync(item);
+    }
+
+    private void OpenAttachment(AttachmentItem item)
+    {
+        var fullPath = _fileService.GetFullPath(item.RelativePath);
+        if (File.Exists(fullPath))
+            Process.Start(new ProcessStartInfo(fullPath) { UseShellExecute = true });
+    }
+
+    private async Task DeleteAttachmentAsync(AttachmentItem item)
+    {
+        var result = MessageBox.Show(
+            $"確定要刪除附件「{item.FileName}」？\n此操作將同時刪除儲存的檔案，無法復原。",
+            "刪除確認",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+
+        if (result != MessageBoxResult.Yes)
+            return;
+
+        await _diaryService.DeleteAttachmentAsync(item.DbId);
+        _fileService.DeleteFile(item.RelativePath);
+        await RefreshAttachmentListAsync();
+    }
+
+    // ════════════════════════════════════════
+    // 顯示模型對應 / 工具方法
+    // ════════════════════════════════════════
 
     private AttachmentItem MapToDisplayItem(FileAttachment f) => new()
     {
