@@ -1,0 +1,241 @@
+<Window x:Class="WorkDiary.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="WorkDiary" Height="780" Width="880"
+        MinHeight="600" MinWidth="650"
+        WindowStartupLocation="CenterScreen"
+        Background="#F0F2F5">
+
+    <Window.Resources>
+        <!-- 藍色強調按鈕樣式 -->
+        <Style x:Key="AccentButton" TargetType="Button">
+            <Setter Property="Background" Value="#0078D4"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="12,5"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}"
+                                CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#006CBE"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="#005A9E"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Background" Value="#CCCCCC"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>  <!-- 日曆區 -->
+            <RowDefinition Height="*"/>     <!-- 文字編輯區 -->
+            <RowDefinition Height="220"/>   <!-- 附件區 -->
+        </Grid.RowDefinitions>
+
+        <!-- ════════════════════════════════════════
+             頂部：日曆區
+             ════════════════════════════════════════ -->
+        <Border Grid.Row="0"
+                Background="White"
+                BorderBrush="#E1E4E8"
+                BorderThickness="0,0,0,1"
+                Padding="20,16,20,12">
+            <StackPanel>
+                <TextBlock Text="📔  WorkDiary"
+                           FontSize="22" FontWeight="Bold"
+                           Foreground="#0078D4"
+                           Margin="0,0,0,12"/>
+                <Calendar x:Name="DiaryCalendar"
+                          SelectionMode="SingleDate"
+                          HorizontalAlignment="Left"
+                          SelectedDatesChanged="DiaryCalendar_SelectedDatesChanged"/>
+            </StackPanel>
+        </Border>
+
+        <!-- ════════════════════════════════════════
+             中間：文字編輯區
+             ════════════════════════════════════════ -->
+        <Border Grid.Row="1"
+                Background="White"
+                BorderBrush="#E1E4E8"
+                BorderThickness="0,0,0,1"
+                Margin="0,8,0,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- 日期標題列 -->
+                <Border Grid.Row="0"
+                        Background="#FAFAFA"
+                        BorderBrush="#E1E4E8"
+                        BorderThickness="0,0,0,1"
+                        Padding="16,10">
+                    <TextBlock x:Name="DateHeaderText"
+                               FontSize="15" FontWeight="SemiBold"
+                               Foreground="#24292E"/>
+                </Border>
+
+                <!-- 文字編輯器 + 提示文字 -->
+                <Grid Grid.Row="1">
+                    <RichTextBox x:Name="DiaryRichTextBox"
+                                 Padding="16,12"
+                                 FontSize="14"
+                                 FontFamily="Microsoft JhengHei UI, Segoe UI"
+                                 BorderThickness="0"
+                                 Background="White"
+                                 Foreground="#24292E"
+                                 VerticalScrollBarVisibility="Auto"
+                                 AcceptsReturn="True"
+                                 AcceptsTab="True"
+                                 TextChanged="DiaryRichTextBox_TextChanged">
+                        <RichTextBox.Resources>
+                            <Style TargetType="Paragraph">
+                                <Setter Property="Margin" Value="0,0,0,2"/>
+                                <Setter Property="LineHeight" Value="24"/>
+                            </Style>
+                        </RichTextBox.Resources>
+                    </RichTextBox>
+                    <!-- 空白提示文字（placeholder） -->
+                    <TextBlock x:Name="EditorPlaceholder"
+                               Text="在此輸入今日工作記錄..."
+                               Foreground="#C0C4CC"
+                               FontSize="14"
+                               FontFamily="Microsoft JhengHei UI, Segoe UI"
+                               Margin="20,14,0,0"
+                               VerticalAlignment="Top"
+                               IsHitTestVisible="False"/>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- ════════════════════════════════════════
+             底部：附件區
+             ════════════════════════════════════════ -->
+        <Border Grid.Row="2"
+                Background="White"
+                Margin="0,8,0,0"
+                BorderBrush="#E1E4E8"
+                BorderThickness="0,1,0,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- 附件標題列 -->
+                <Border Grid.Row="0"
+                        Background="#FAFAFA"
+                        BorderBrush="#E1E4E8"
+                        BorderThickness="0,0,0,1"
+                        Padding="16,8">
+                    <DockPanel>
+                        <TextBlock Text="📎  附件"
+                                   FontSize="14" FontWeight="SemiBold"
+                                   Foreground="#24292E"
+                                   VerticalAlignment="Center"/>
+                        <Button DockPanel.Dock="Right"
+                                x:Name="AddAttachmentButton"
+                                Content="＋ 新增附件"
+                                Click="AddAttachmentButton_Click"
+                                Style="{StaticResource AccentButton}"/>
+                    </DockPanel>
+                </Border>
+
+                <!-- 拖曳區 / 附件清單 -->
+                <Border Grid.Row="1"
+                        x:Name="DropZoneBorder"
+                        AllowDrop="True"
+                        Drop="DropZone_Drop"
+                        DragEnter="DropZone_DragEnter"
+                        DragOver="DropZone_DragOver"
+                        DragLeave="DropZone_DragLeave"
+                        Background="Transparent"
+                        BorderThickness="2"
+                        BorderBrush="Transparent"
+                        CornerRadius="4"
+                        Margin="8,6">
+                    <Grid>
+                        <!-- 空白提示 -->
+                        <StackPanel x:Name="DropHint"
+                                    VerticalAlignment="Center"
+                                    HorizontalAlignment="Center">
+                            <TextBlock Text="📂"
+                                       FontSize="32"
+                                       HorizontalAlignment="Center"/>
+                            <TextBlock Text="拖曳檔案到此處，或點擊「＋ 新增附件」"
+                                       Foreground="#9EA3A8" FontSize="13"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,8,0,0"/>
+                            <TextBlock Text="支援：Excel、PDF、PPT、TXT、JPG、PNG"
+                                       Foreground="#C0C4CC" FontSize="11"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,4,0,0"/>
+                        </StackPanel>
+
+                        <!-- 附件清單 -->
+                        <ListView x:Name="AttachmentListView"
+                                  BorderThickness="0"
+                                  Background="Transparent"
+                                  Visibility="Collapsed"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                  MouseDoubleClick="AttachmentListView_MouseDoubleClick">
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                    <Setter Property="Padding" Value="4,6"/>
+                                    <Setter Property="BorderThickness" Value="0,0,0,1"/>
+                                    <Setter Property="BorderBrush" Value="#F0F0F0"/>
+                                </Style>
+                            </ListView.ItemContainerStyle>
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="30"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0"
+                                                   Text="{Binding Icon}"
+                                                   FontSize="18"
+                                                   VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding FileName}"
+                                                   VerticalAlignment="Center"
+                                                   FontSize="13"
+                                                   Foreground="#24292E"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding FileSize}"
+                                                   Foreground="#9EA3A8"
+                                                   FontSize="11"
+                                                   VerticalAlignment="Center"
+                                                   Margin="16,0,0,0"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
