@@ -43,29 +43,30 @@
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>  <!-- 日曆區 -->
+            <RowDefinition Height="Auto"/>  <!-- 標題列 -->
             <RowDefinition Height="*"/>     <!-- 文字編輯區 -->
             <RowDefinition Height="220"/>   <!-- 附件區 -->
         </Grid.RowDefinitions>
 
         <!-- ════════════════════════════════════════
-             頂部：日曆區
+             頂部：緊湊標題列（月曆改為浮動視窗）
              ════════════════════════════════════════ -->
         <Border Grid.Row="0"
                 Background="White"
                 BorderBrush="#E1E4E8"
                 BorderThickness="0,0,0,1"
-                Padding="20,16,20,12">
-            <StackPanel>
+                Padding="16,10">
+            <DockPanel>
                 <TextBlock Text="📔  WorkDiary"
-                           FontSize="22" FontWeight="Bold"
+                           FontSize="18" FontWeight="Bold"
                            Foreground="#0078D4"
-                           Margin="0,0,0,12"/>
-                <Calendar x:Name="DiaryCalendar"
-                          SelectionMode="SingleDate"
-                          HorizontalAlignment="Left"
-                          SelectedDatesChanged="DiaryCalendar_SelectedDatesChanged"/>
-            </StackPanel>
+                           VerticalAlignment="Center"/>
+                <Button DockPanel.Dock="Right"
+                        x:Name="CalendarToggleButton"
+                        Click="CalendarToggleButton_Click"
+                        Style="{StaticResource AccentButton}"
+                        ToolTip="點擊開啟 / 關閉月曆"/>
+            </DockPanel>
         </Border>
 
         <!-- ════════════════════════════════════════
@@ -146,17 +147,10 @@
                         BorderBrush="#E1E4E8"
                         BorderThickness="0,0,0,1"
                         Padding="16,8">
-                    <DockPanel>
-                        <TextBlock Text="📎  附件"
-                                   FontSize="14" FontWeight="SemiBold"
-                                   Foreground="#24292E"
-                                   VerticalAlignment="Center"/>
-                        <Button DockPanel.Dock="Right"
-                                x:Name="AddAttachmentButton"
-                                Content="＋ 新增附件"
-                                Click="AddAttachmentButton_Click"
-                                Style="{StaticResource AccentButton}"/>
-                    </DockPanel>
+                    <TextBlock Text="📎  附件"
+                               FontSize="14" FontWeight="SemiBold"
+                               Foreground="#24292E"
+                               VerticalAlignment="Center"/>
                 </Border>
 
                 <!-- 拖曳區 / 附件清單 -->
@@ -180,7 +174,7 @@
                             <TextBlock Text="📂"
                                        FontSize="32"
                                        HorizontalAlignment="Center"/>
-                            <TextBlock Text="拖曳檔案到此處，或點擊「＋ 新增附件」"
+                            <TextBlock Text="直接拖曳檔案到此處"
                                        Foreground="#9EA3A8" FontSize="13"
                                        HorizontalAlignment="Center"
                                        Margin="0,8,0,0"/>

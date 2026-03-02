@@ -14,32 +14,65 @@ public partial class MainWindow : Window
     private readonly Dictionary<DateTime, List<AttachmentItem>> _attachmentEntries = new();
     private DateTime _currentDate = DateTime.Today;
 
+    // ── 浮動月曆視窗（建立一次，重複顯示/隱藏）──
+    private readonly FloatingCalendarWindow _calendarWindow;
+
     public MainWindow()
     {
         InitializeComponent();
-        DiaryCalendar.SelectedDate = DateTime.Today;
+
+        _calendarWindow = new FloatingCalendarWindow();
+        _calendarWindow.SetSelectedDate(DateTime.Today);
+        _calendarWindow.DateSelected += OnCalendarDateSelected;
+
+        UpdateCalendarButton(DateTime.Today);
         UpdateDateHeader(DateTime.Today);
         UpdatePlaceholderVisibility();
     }
 
     // ════════════════════════════════════════
-    // 日期選擇
+    // 月曆切換按鈕
     // ════════════════════════════════════════
 
-    private void DiaryCalendar_SelectedDatesChanged(object sender, SelectionChangedEventArgs e)
+    private void CalendarToggleButton_Click(object sender, RoutedEventArgs e)
     {
-        if (DiaryCalendar.SelectedDate is { } selected)
+        if (_calendarWindow.IsVisible)
         {
-            SaveCurrentEntry();
-            _currentDate = selected.Date;
-            LoadEntryForDate(_currentDate);
-            UpdateDateHeader(_currentDate);
+            _calendarWindow.Hide();
+            return;
         }
+
+        // 定位浮動視窗：出現在按鈕正下方
+        var btnPos = CalendarToggleButton.PointToScreen(
+            new Point(0, CalendarToggleButton.ActualHeight + 4));
+
+        _calendarWindow.Left = btnPos.X;
+        _calendarWindow.Top  = btnPos.Y;
+        _calendarWindow.Show();
     }
+
+    // ── 浮動月曆選取日期回呼 ──
+    private void OnCalendarDateSelected(DateTime date)
+    {
+        SaveCurrentEntry();
+        _currentDate = date;
+        LoadEntryForDate(_currentDate);
+        UpdateDateHeader(_currentDate);
+        UpdateCalendarButton(_currentDate);
+    }
+
+    private void UpdateCalendarButton(DateTime date)
+    {
+        CalendarToggleButton.Content = $"📅  {date:yyyy-MM-dd}";
+    }
+
+    // ════════════════════════════════════════
+    // 日期標題
+    // ════════════════════════════════════════
 
     private void UpdateDateHeader(DateTime date)
     {
-        var isToday = date.Date == DateTime.Today;
+        var isToday  = date.Date == DateTime.Today;
         var dayLabel = GetChineseDayOfWeek(date.DayOfWeek);
         DateHeaderText.Text = isToday
             ? $"{date:yyyy年M月d日}　{dayLabel}　（今天）"
@@ -87,6 +120,7 @@ public partial class MainWindow : Window
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
         SaveCurrentEntry();
+        _calendarWindow.Close();
         base.OnClosing(e);
     }
 
@@ -191,26 +225,6 @@ public partial class MainWindow : Window
     }
 
     // ════════════════════════════════════════
-    // 新增附件按鈕
-    // ════════════════════════════════════════
-
-    private void AddAttachmentButton_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new Microsoft.Win32.OpenFileDialog
-        {
-            Title = "選擇附件",
-            Filter = "支援的格式|*.xlsx;*.xls;*.pdf;*.pptx;*.ppt;*.txt;*.jpg;*.jpeg;*.png|所有檔案|*.*",
-            Multiselect = true
-        };
-
-        if (dialog.ShowDialog() == true)
-        {
-            foreach (var file in dialog.FileNames)
-                AddFileToList(file);
-        }
-    }
-
-    // ════════════════════════════════════════
     // 附件處理
     // ════════════════════════════════════════
 
@@ -233,7 +247,6 @@ public partial class MainWindow : Window
         if (!_attachmentEntries.ContainsKey(_currentDate))
             _attachmentEntries[_currentDate] = new List<AttachmentItem>();
 
-        // 避免重複加入同一檔案
         var existing = _attachmentEntries[_currentDate];
         if (existing.Exists(a => a.FilePath == filePath))
             return;
@@ -250,13 +263,11 @@ public partial class MainWindow : Window
         ShowAttachmentList();
     }
 
-    // 雙擊附件 → 用系統預設程式開啟（Phase 1 直接開啟原始路徑）
+    // 雙擊附件 → 系統預設程式開啟
     private void AttachmentListView_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (AttachmentListView.SelectedItem is AttachmentItem item && File.Exists(item.FilePath))
-        {
             Process.Start(new ProcessStartInfo(item.FilePath) { UseShellExecute = true });
-        }
     }
 
     private static string GetFileIcon(string ext) => ext switch
@@ -276,9 +287,9 @@ public partial class MainWindow : Window
             var size = new FileInfo(filePath).Length;
             return size switch
             {
-                < 1_024             => $"{size} B",
-                < 1_048_576         => $"{size / 1024.0:F1} KB",
-                _                   => $"{size / 1_048_576.0:F1} MB"
+                < 1_024         => $"{size} B",
+                < 1_048_576     => $"{size / 1024.0:F1} KB",
+                _               => $"{size / 1_048_576.0:F1} MB"
             };
         }
         catch { return string.Empty; }
