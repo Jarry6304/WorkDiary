@@ -10,7 +10,7 @@ public class DiaryService
 
     public DiaryService(AppDbContext db) => _db = db;
 
-    // ── 讀取（AsNoTracking，始終取得 DB 最新資料）──
+    // ── 讀取 ──
 
     public async Task<DiaryEntry?> GetEntryAsync(DateTime date)
     {
@@ -22,9 +22,6 @@ public class DiaryService
 
     // ── 寫入 ──
 
-    /// <summary>
-    /// 取得或建立指定日期的 DiaryEntry（追蹤狀態，供後續加入附件使用）。
-    /// </summary>
     public async Task<DiaryEntry> GetOrCreateEntryAsync(DateTime date)
     {
         var existing = await _db.DiaryEntries
@@ -48,9 +45,9 @@ public class DiaryService
 
     /// <summary>
     /// 自動儲存文字內容：
-    /// - 有記錄 → 直接 UPDATE（跳過 EF 追蹤）
+    /// - 有記錄 → UPDATE（跳過 EF 追蹤）
     /// - 無記錄且內容非空 → INSERT
-    /// - 無記錄且內容空白 → 略過（不寫入空記錄）
+    /// - 無記錄且內容空白 → 略過
     /// </summary>
     public async Task SaveContentAsync(DateTime date, string content)
     {
@@ -73,6 +70,16 @@ public class DiaryService
         }
     }
 
+    /// <summary>切換置頂狀態。</summary>
+    public async Task SetPinnedAsync(DateTime date, bool pinned)
+    {
+        await _db.DiaryEntries
+            .Where(e => e.Date == date.Date)
+            .ExecuteUpdateAsync(s => s.SetProperty(e => e.IsPinned, pinned));
+    }
+
+    // ── 附件 ──
+
     public async Task AddAttachmentAsync(FileAttachment attachment)
     {
         _db.FileAttachments.Add(attachment);
@@ -84,5 +91,19 @@ public class DiaryService
         await _db.FileAttachments
             .Where(f => f.Id == attachmentId)
             .ExecuteDeleteAsync();
+    }
+
+    // ── 搜尋 ──
+
+    /// <summary>全文搜尋，置頂者優先，最多回傳 10 筆。</summary>
+    public async Task<List<DiaryEntry>> SearchAsync(string keyword)
+    {
+        return await _db.DiaryEntries
+            .Where(e => EF.Functions.Like(e.Content, $"%{keyword}%"))
+            .OrderByDescending(e => e.IsPinned)
+            .ThenByDescending(e => e.Date)
+            .Take(10)
+            .AsNoTracking()
+            .ToListAsync();
     }
 }

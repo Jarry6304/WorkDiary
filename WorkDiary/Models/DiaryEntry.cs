@@ -9,6 +9,9 @@ public class DiaryEntry
 
     public string Content { get; set; } = string.Empty;
 
+    /// <summary>是否置頂</summary>
+    public bool IsPinned { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
