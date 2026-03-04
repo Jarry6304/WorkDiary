@@ -11,9 +11,11 @@ namespace WorkDiary;
 public partial class MainWindow : Window
 {
     // ── 服務層 ──
-    private readonly AppDbContext  _db;
-    private readonly DiaryService  _diaryService;
-    private readonly FileService   _fileService;
+    private readonly AppDbContext    _db;
+    private readonly DiaryService    _diaryService;
+    private readonly FileService     _fileService;
+    private readonly EmbeddingService  _embeddingService;
+    private readonly VectorStoreService _vectorStore;
 
     // ── 目前日期 ──
     private DateTime _currentDate = DateTime.Today;
@@ -58,8 +60,29 @@ public partial class MainWindow : Window
             "ALTER TABLE DiaryEntries ADD COLUMN Tags TEXT NOT NULL DEFAULT ''"); }
         catch { /* 欄位已存在，忽略 */ }
 
-        _diaryService = new DiaryService(_db);
-        _fileService  = new FileService();
+        // Tag 關係表（首次使用時建立）
+        _db.Database.ExecuteSqlRaw(
+            "CREATE TABLE IF NOT EXISTS Tags (" +
+            "Id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+            "Name TEXT NOT NULL DEFAULT '' UNIQUE)");
+
+        _db.Database.ExecuteSqlRaw(
+            "CREATE TABLE IF NOT EXISTS DiaryEntryTag (" +
+            "DiaryEntryId INTEGER NOT NULL, " +
+            "TagId INTEGER NOT NULL, " +
+            "PRIMARY KEY (DiaryEntryId, TagId), " +
+            "FOREIGN KEY (DiaryEntryId) REFERENCES DiaryEntries(Id) ON DELETE CASCADE, " +
+            "FOREIGN KEY (TagId) REFERENCES Tags(Id) ON DELETE CASCADE)");
+
+        // 語意向量欄位
+        try { _db.Database.ExecuteSqlRaw(
+            "ALTER TABLE DiaryEntries ADD COLUMN Embedding BLOB"); }
+        catch { /* 欄位已存在，忽略 */ }
+
+        _diaryService     = new DiaryService(_db);
+        _fileService      = new FileService();
+        _embeddingService = new EmbeddingService();
+        _vectorStore      = new VectorStoreService();
 
         _autoSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _autoSaveTimer.Tick += AutoSaveTimer_Tick;
@@ -84,6 +107,7 @@ public partial class MainWindow : Window
         _tagInputBox.GotFocus  += (_, _) => _tagInputPlaceholder.Visibility = Visibility.Collapsed;
         _tagInputBox.LostFocus += async (_, _) =>
         {
+            if (_pickingSuggestion) return;
             if (string.IsNullOrWhiteSpace(_tagInputBox.Text))
                 _tagInputPlaceholder.Visibility = Visibility.Visible;
             await CommitTagInputAsync();
@@ -102,6 +126,9 @@ public partial class MainWindow : Window
         _tagInputContainer.Children.Add(_tagInputBox);
         _tagInputContainer.Children.Add(_tagInputPlaceholder);
 
+        // 初始化標籤自動完成 Popup（需在 _tagInputContainer 建立後呼叫）
+        InitTagAutocompletePopup();
+
         Background = EditModeBg;
 
         UpdateCalendarButton(DateTime.Today);
@@ -109,7 +136,47 @@ public partial class MainWindow : Window
         UpdatePlaceholderVisibility();
         RefreshTagsBar();
 
-        Loaded += async (_, _) => await LoadEntryForDateAsync(_currentDate);
+        Loaded += async (_, _) =>
+        {
+            await LoadEntryForDateAsync(_currentDate);
+            // 遷移既有 CSV 標籤到 Tag 表（輕量，UI 執行緒）
+            await _diaryService.MigrateTagsCsvToTableAsync();
+            // 語意引擎初始化（背景執行緒，使用獨立 DbContext）
+            _ = Task.Run(InitEmbeddingAsync);
+        };
+    }
+
+    // ════════════════════════════════════════
+    // 語意引擎背景初始化
+    // ════════════════════════════════════════
+
+    private async Task InitEmbeddingAsync()
+    {
+        try
+        {
+            await _embeddingService.InitializeAsync();
+
+            using var bgDb = new AppDbContext();
+            await _vectorStore.LoadAllAsync(bgDb);
+
+            // 補算尚無向量的日誌
+            var pending = await bgDb.DiaryEntries
+                .Where(e => e.Embedding == null && e.Content != string.Empty)
+                .Select(e => new { e.Id, e.Content })
+                .AsNoTracking()
+                .ToListAsync();
+
+            foreach (var entry in pending)
+            {
+                var embedding = _embeddingService.GetEmbedding(entry.Content);
+                _vectorStore.Upsert(entry.Id, embedding);
+                await _vectorStore.PersistAsync(entry.Id, embedding, bgDb);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[EmbeddingService] 初始化失敗: {ex.Message}");
+        }
     }
 
     // ════════════════════════════════════════

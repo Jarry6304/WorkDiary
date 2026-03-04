@@ -19,4 +19,10 @@ public class DiaryEntry
     public DateTime UpdatedAt { get; set; }
 
     public List<FileAttachment> Attachments { get; set; } = new();
+
+    /// <summary>Tag 關係表（多對多）</summary>
+    public ICollection<Tag> TagEntities { get; set; } = new List<Tag>();
+
+    /// <summary>all-MiniLM-L6-v2 語意向量（float[384] 序列化為 BLOB）</summary>
+    public byte[]? Embedding { get; set; }
 }

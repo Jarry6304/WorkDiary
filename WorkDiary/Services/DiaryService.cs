@@ -139,4 +139,86 @@ public class DiaryService
             .AsNoTracking()
             .ToListAsync();
     }
+
+    // ── Tag 關係表 ──
+
+    /// <summary>取所有已知標籤名稱（用於輸入自動完成）。</summary>
+    public async Task<List<string>> GetAllTagNamesAsync()
+    {
+        return await _db.Tags
+            .OrderBy(t => t.Name)
+            .Select(t => t.Name)
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// 將 CSV 標籤字串同步至 Tag 關係表（使用原生 SQL 避免 EF 追蹤複雜度）。
+    /// </summary>
+    public async Task SyncTagsAsync(DateTime date, List<string> tagNames)
+    {
+        var entry = await _db.DiaryEntries
+            .AsNoTracking()
+            .FirstOrDefaultAsync(e => e.Date == date.Date);
+
+        if (entry == null) return;
+
+        // 清除舊關聯
+        await _db.Database.ExecuteSqlRawAsync(
+            "DELETE FROM DiaryEntryTag WHERE DiaryEntryId = {0}", entry.Id);
+
+        foreach (var name in tagNames.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            // 確保 Tag 記錄存在
+            await _db.Database.ExecuteSqlRawAsync(
+                "INSERT OR IGNORE INTO Tags (Name) VALUES ({0})", name);
+
+            // 建立 junction 記錄
+            await _db.Database.ExecuteSqlRawAsync(
+                "INSERT OR IGNORE INTO DiaryEntryTag (DiaryEntryId, TagId) " +
+                "SELECT {0}, Id FROM Tags WHERE Name = {1}",
+                entry.Id, name);
+        }
+    }
+
+    /// <summary>首次啟動時，將現有 CSV Tags 欄位遷移到 Tags 表（只建標籤名稱，無 junction）。</summary>
+    public async Task MigrateTagsCsvToTableAsync()
+    {
+        var allTagStrings = await _db.DiaryEntries
+            .Where(e => e.Tags != string.Empty)
+            .Select(e => e.Tags)
+            .AsNoTracking()
+            .ToListAsync();
+
+        var allNames = allTagStrings
+            .SelectMany(s => s.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            .Select(t => t.Trim())
+            .Where(t => !string.IsNullOrEmpty(t))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var name in allNames)
+            await _db.Database.ExecuteSqlRawAsync(
+                "INSERT OR IGNORE INTO Tags (Name) VALUES ({0})", name);
+    }
+
+    // ── Embedding ──
+
+    /// <summary>更新指定日誌的語意向量。</summary>
+    public async Task UpdateEmbeddingAsync(int entryId, byte[] embedding)
+    {
+        await _db.DiaryEntries
+            .Where(e => e.Id == entryId)
+            .ExecuteUpdateAsync(s => s.SetProperty(e => e.Embedding, embedding));
+    }
+
+    /// <summary>取得尚未建立語意向量的日誌清單（Id + 內容）。</summary>
+    public async Task<List<(int Id, string Content)>> GetEntriesWithoutEmbeddingAsync()
+    {
+        var results = await _db.DiaryEntries
+            .Where(e => e.Embedding == null && e.Content != string.Empty)
+            .Select(e => new { e.Id, e.Content })
+            .AsNoTracking()
+            .ToListAsync();
+
+        return results.Select(x => (x.Id, x.Content)).ToList();
+    }
 }
