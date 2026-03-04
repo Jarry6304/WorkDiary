@@ -93,12 +93,16 @@
                     <ColumnDefinition Width="Auto"/>  <!-- 導航按鈕 -->
                 </Grid.ColumnDefinitions>
 
-                <!-- Logo -->
-                <TextBlock Grid.Column="0"
-                           Text="📔  WorkDiary"
-                           FontSize="16" FontWeight="Bold"
-                           Foreground="#0078D4"
-                           VerticalAlignment="Center"/>
+                <!-- 面板切換按鈕（文字顯示目標模式）-->
+                <Button x:Name="ModeToggleButton"
+                        Grid.Column="0"
+                        Content="📋  瀏覽模式"
+                        FontSize="15" FontWeight="Bold"
+                        Foreground="#0078D4"
+                        Style="{StaticResource GhostButton}"
+                        Padding="4,2"
+                        VerticalAlignment="Center"
+                        Click="ModeToggleButton_Click"/>
 
                 <!-- 搜尋框（置中）-->
                 <Grid Grid.Column="1"
@@ -173,8 +177,9 @@
                     </Popup>
                 </Grid>
 
-                <!-- 導航按鈕 -->
-                <StackPanel Grid.Column="2"
+                <!-- 導航按鈕（瀏覽模式下隱藏）-->
+                <StackPanel x:Name="NavButtonsPanel"
+                            Grid.Column="2"
                             Orientation="Horizontal"
                             VerticalAlignment="Center">
                     <Button x:Name="PrevDayButton"
@@ -208,6 +213,7 @@
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>  <!-- 日期標題（可收起觸發）-->
+                    <RowDefinition Height="Auto"/>  <!-- 標籤列（可收起）-->
                     <RowDefinition Height="*"/>     <!-- 編輯器（可收起）-->
                     <RowDefinition Height="Auto"/>  <!-- 字數列（可收起）-->
                 </Grid.RowDefinitions>
@@ -248,8 +254,19 @@
                     </DockPanel>
                 </Border>
 
+                <!-- 標籤列（可收起）-->
+                <Border Grid.Row="1"
+                        x:Name="TagsBar"
+                        Background="#FAFAFA"
+                        BorderBrush="#E1E4E8"
+                        BorderThickness="0,0,0,1"
+                        Padding="12,6">
+                    <WrapPanel x:Name="TagsWrapPanel"
+                               VerticalAlignment="Center"/>
+                </Border>
+
                 <!-- 編輯器（可收起）-->
-                <Grid Grid.Row="1" x:Name="EditorGrid">
+                <Grid Grid.Row="2" x:Name="EditorGrid">
                     <RichTextBox x:Name="DiaryRichTextBox"
                                  Padding="16,12"
                                  FontSize="14"
@@ -279,7 +296,7 @@
                 </Grid>
 
                 <!-- 字數統計（可收起）-->
-                <Border Grid.Row="2"
+                <Border Grid.Row="3"
                         x:Name="WordCountBar"
                         Background="#FAFAFA"
                         BorderBrush="#E1E4E8"
@@ -411,5 +428,16 @@
                 </Border>
             </Grid>
         </Border>
+        <!-- ════════════════════════════════════════
+             瀏覽面板（覆蓋 Row 1+2，預設隱藏）
+             ════════════════════════════════════════ -->
+        <ScrollViewer x:Name="BrowseScrollViewer"
+                      Grid.Row="1" Grid.RowSpan="2"
+                      Visibility="Collapsed"
+                      VerticalScrollBarVisibility="Auto"
+                      Margin="0,8,0,0"
+                      Background="White">
+            <StackPanel x:Name="BrowseEntriesPanel"/>
+        </ScrollViewer>
     </Grid>
 </Window>

@@ -12,6 +12,9 @@ public class DiaryEntry
     /// <summary>是否置頂</summary>
     public bool IsPinned { get; set; }
 
+    /// <summary>副標題標籤（逗號分隔儲存）</summary>
+    public string Tags { get; set; } = string.Empty;
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

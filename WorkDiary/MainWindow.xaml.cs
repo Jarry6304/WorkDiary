@@ -32,6 +32,15 @@ public partial class MainWindow : Window
     // ── 每日折疊狀態（key = date.Date）──
     private readonly Dictionary<DateTime, bool> _collapsedDates = new();
 
+    // ── 面板模式 ──
+    private bool _isBrowseMode = false;
+
+    // ── 標籤管理 ──
+    private List<string> _currentTags = new();
+    private readonly TextBox    _tagInputBox;
+    private readonly TextBlock  _tagInputPlaceholder;
+    private readonly Grid       _tagInputContainer;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -39,9 +48,13 @@ public partial class MainWindow : Window
         _db = new AppDbContext();
         _db.Database.EnsureCreated();
 
-        // 相容舊 DB：新增 IsPinned 欄位（若已存在則略過）
+        // 相容舊 DB：新增欄位（若已存在則略過）
         try { _db.Database.ExecuteSqlRaw(
             "ALTER TABLE DiaryEntries ADD COLUMN IsPinned INTEGER NOT NULL DEFAULT 0"); }
+        catch { /* 欄位已存在，忽略 */ }
+
+        try { _db.Database.ExecuteSqlRaw(
+            "ALTER TABLE DiaryEntries ADD COLUMN Tags TEXT NOT NULL DEFAULT ''"); }
         catch { /* 欄位已存在，忽略 */ }
 
         _diaryService = new DiaryService(_db);
@@ -54,11 +67,441 @@ public partial class MainWindow : Window
         _calendarWindow.SetSelectedDate(DateTime.Today);
         _calendarWindow.DateSelected += async date => await NavigateToDateAsync(date);
 
+        // 初始化標籤輸入控件
+        _tagInputBox = new TextBox
+        {
+            BorderThickness = new Thickness(0),
+            Background = Brushes.Transparent,
+            FontSize = 11,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x24, 0x29, 0x2E)),
+            MinWidth = 90,
+            VerticalAlignment = VerticalAlignment.Center,
+            FontFamily = new FontFamily("Microsoft JhengHei UI, Segoe UI"),
+            ToolTip = "輸入後按 Enter 或逗號新增標籤"
+        };
+        _tagInputBox.KeyDown += TagInputBox_KeyDown;
+        _tagInputBox.GotFocus  += (_, _) => _tagInputPlaceholder.Visibility = Visibility.Collapsed;
+        _tagInputBox.LostFocus += async (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(_tagInputBox.Text))
+                _tagInputPlaceholder.Visibility = Visibility.Visible;
+            await CommitTagInputAsync();
+        };
+
+        _tagInputPlaceholder = new TextBlock
+        {
+            Text = "新增標籤...",
+            Foreground = new SolidColorBrush(Color.FromRgb(0xC0, 0xC4, 0xCC)),
+            FontSize = 11,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false
+        };
+
+        _tagInputContainer = new Grid { MinWidth = 90 };
+        _tagInputContainer.Children.Add(_tagInputBox);
+        _tagInputContainer.Children.Add(_tagInputPlaceholder);
+
         UpdateCalendarButton(DateTime.Today);
         UpdateDateHeader(DateTime.Today);
         UpdatePlaceholderVisibility();
+        RefreshTagsBar();
 
         Loaded += async (_, _) => await LoadEntryForDateAsync(_currentDate);
+    }
+
+    // ════════════════════════════════════════
+    // 面板模式切換
+    // ════════════════════════════════════════
+
+    private async void ModeToggleButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isBrowseMode)
+        {
+            // 切回編輯模式
+            _isBrowseMode = false;
+            BrowseScrollViewer.Visibility = Visibility.Collapsed;
+
+            // 恢復編輯相關控件
+            var editBorder = (Border)((Grid)Content).Children
+                .OfType<Border>().First(b => (int)(b.GetValue(Grid.RowProperty)) == 1);
+            editBorder.Visibility = Visibility.Visible;
+
+            var attachBorder = (Border)((Grid)Content).Children
+                .OfType<Border>().First(b => (int)(b.GetValue(Grid.RowProperty)) == 2);
+            attachBorder.Visibility = Visibility.Visible;
+
+            NavButtonsPanel.Visibility = Visibility.Visible;
+            ModeToggleButton.Content = "📋  瀏覽模式";
+
+            await LoadEntryForDateAsync(_currentDate);
+        }
+        else
+        {
+            // 切換到瀏覽模式
+            await CommitTagInputAsync();
+            _isBrowseMode = true;
+
+            var editBorder = (Border)((Grid)Content).Children
+                .OfType<Border>().First(b => (int)(b.GetValue(Grid.RowProperty)) == 1);
+            editBorder.Visibility = Visibility.Collapsed;
+
+            var attachBorder = (Border)((Grid)Content).Children
+                .OfType<Border>().First(b => (int)(b.GetValue(Grid.RowProperty)) == 2);
+            attachBorder.Visibility = Visibility.Collapsed;
+
+            BrowseScrollViewer.Visibility = Visibility.Visible;
+            NavButtonsPanel.Visibility = Visibility.Collapsed;
+            ModeToggleButton.Content = "✏️  編輯模式";
+
+            await LoadBrowsePanelAsync();
+        }
+    }
+
+    // ════════════════════════════════════════
+    // 瀏覽面板
+    // ════════════════════════════════════════
+
+    private async Task LoadBrowsePanelAsync()
+    {
+        BrowseEntriesPanel.Children.Clear();
+
+        var entries = await _diaryService.GetAllEntriesAsync();
+
+        if (entries.Count == 0)
+        {
+            BrowseEntriesPanel.Children.Add(new TextBlock
+            {
+                Text = "尚無日誌記錄",
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x9E, 0xA3, 0xA8)),
+                Margin = new Thickness(0, 48, 0, 0),
+                FontSize = 14,
+                FontFamily = new FontFamily("Microsoft JhengHei UI, Segoe UI")
+            });
+            return;
+        }
+
+        foreach (var entry in entries)
+            BrowseEntriesPanel.Children.Add(CreateEntryRow(entry));
+    }
+
+    private UIElement CreateEntryRow(DiaryEntry entry)
+    {
+        var outer = new Border
+        {
+            Background = Brushes.White,
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0xE1, 0xE4, 0xE8)),
+            BorderThickness = new Thickness(0, 0, 0, 1)
+        };
+
+        var outerStack = new StackPanel();
+        outer.Child = outerStack;
+
+        // ── 標題列 ──
+        var headerBg = new SolidColorBrush(Color.FromRgb(0xFA, 0xFA, 0xFA));
+        var headerBorder = new Border
+        {
+            Background = headerBg,
+            Padding = new Thickness(12, 10, 12, 10),
+            Cursor = Cursors.Hand
+        };
+
+        var dock = new DockPanel { LastChildFill = false };
+        headerBorder.Child = dock;
+
+        // 折疊箭頭
+        var chevron = new TextBlock
+        {
+            Text = "▶",
+            Foreground = new SolidColorBrush(Color.FromRgb(0xB0, 0xB5, 0xBC)),
+            FontSize = 10,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 8, 0)
+        };
+        DockPanel.SetDock(chevron, Dock.Left);
+        dock.Children.Add(chevron);
+
+        // 置頂按鈕
+        var pinBtn = new Button
+        {
+            Content = entry.IsPinned ? "★" : "☆",
+            Style = (Style)FindResource("GhostButton"),
+            FontSize = 14,
+            Foreground = entry.IsPinned
+                ? new SolidColorBrush(Color.FromRgb(0xFF, 0xB9, 0x00))
+                : new SolidColorBrush(Color.FromRgb(0xC0, 0xC4, 0xCC)),
+            Padding = new Thickness(4, 2, 4, 2),
+            Margin = new Thickness(0, 0, 6, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            ToolTip = entry.IsPinned ? "取消置頂" : "置頂此日記"
+        };
+        DockPanel.SetDock(pinBtn, Dock.Left);
+        dock.Children.Add(pinBtn);
+
+        // 日期文字
+        var dateText = new TextBlock
+        {
+            Text = FormatBrowseDateLabel(entry),
+            FontSize = 14,
+            FontWeight = FontWeights.SemiBold,
+            FontFamily = new FontFamily("Microsoft JhengHei UI, Segoe UI"),
+            Foreground = new SolidColorBrush(Color.FromRgb(0x24, 0x29, 0x2E)),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 8, 0)
+        };
+        DockPanel.SetDock(dateText, Dock.Left);
+        dock.Children.Add(dateText);
+
+        // 標籤 chips（0.75x = 14×0.75 = 10.5）
+        var tagChips = BuildTagChipsPanel(entry.Tags, 10.5);
+        tagChips.VerticalAlignment = VerticalAlignment.Center;
+        DockPanel.SetDock(tagChips, Dock.Left);
+        dock.Children.Add(tagChips);
+
+        // ── 展開內容區 ──
+        var contentBorder = new Border
+        {
+            Visibility = Visibility.Collapsed,
+            Padding = new Thickness(16, 10, 16, 14),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0xE1, 0xE4, 0xE8)),
+            BorderThickness = new Thickness(0, 1, 0, 0),
+            Background = Brushes.White
+        };
+
+        var contentStack = new StackPanel();
+        contentBorder.Child = contentStack;
+
+        // Labels 區塊（副擋，可點擊樣式）
+        if (!string.IsNullOrWhiteSpace(entry.Tags))
+        {
+            var labelsPanel = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
+            var tags = entry.Tags.Split(',',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            foreach (var tag in tags)
+            {
+                var chip = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(0xE8, 0xF4, 0xFF)),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(0x00, 0x78, 0xD4)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(10),
+                    Padding = new Thickness(8, 3, 8, 3),
+                    Margin = new Thickness(0, 0, 6, 4),
+                    Cursor = Cursors.Hand,
+                    ToolTip = $"標籤：{tag}"
+                };
+                chip.Child = new TextBlock
+                {
+                    Text = tag,
+                    FontSize = 12,
+                    FontFamily = new FontFamily("Microsoft JhengHei UI, Segoe UI"),
+                    Foreground = new SolidColorBrush(Color.FromRgb(0x00, 0x78, 0xD4))
+                };
+                labelsPanel.Children.Add(chip);
+            }
+            contentStack.Children.Add(labelsPanel);
+        }
+
+        // 日誌文字
+        contentStack.Children.Add(new TextBlock
+        {
+            Text = string.IsNullOrWhiteSpace(entry.Content) ? "（無內容）" : entry.Content,
+            FontSize = 13,
+            FontFamily = new FontFamily("Microsoft JhengHei UI, Segoe UI"),
+            Foreground = string.IsNullOrWhiteSpace(entry.Content)
+                ? new SolidColorBrush(Color.FromRgb(0xC0, 0xC4, 0xCC))
+                : new SolidColorBrush(Color.FromRgb(0x24, 0x29, 0x2E)),
+            TextWrapping = TextWrapping.Wrap,
+            LineHeight = 22
+        });
+
+        outerStack.Children.Add(headerBorder);
+        outerStack.Children.Add(contentBorder);
+
+        // ── 展開/折疊事件 ──
+        headerBorder.MouseLeftButtonUp += (_, e) =>
+        {
+            // 若點擊來源是 pinBtn 的子元素，不觸發展開
+            if (IsDescendantOf(e.OriginalSource as DependencyObject, pinBtn)) return;
+
+            var expanding = contentBorder.Visibility == Visibility.Collapsed;
+            contentBorder.Visibility = expanding ? Visibility.Visible : Visibility.Collapsed;
+            chevron.Text = expanding ? "▼" : "▶";
+            headerBorder.Background = expanding
+                ? new SolidColorBrush(Color.FromRgb(0xF0, 0xF8, 0xFF))
+                : new SolidColorBrush(Color.FromRgb(0xFA, 0xFA, 0xFA));
+        };
+
+        // ── 置頂按鈕事件 ──
+        pinBtn.Click += async (_, _) =>
+        {
+            var newPinned = !entry.IsPinned;
+            var dbEntry = await _diaryService.GetEntryAsync(entry.Date);
+            if (dbEntry == null) await _diaryService.GetOrCreateEntryAsync(entry.Date);
+            await _diaryService.SetPinnedAsync(entry.Date, newPinned);
+            entry.IsPinned = newPinned;
+            // 重新整理清單（重新排序）
+            await LoadBrowsePanelAsync();
+        };
+
+        return outer;
+    }
+
+    private static WrapPanel BuildTagChipsPanel(string tagsStr, double fontSize)
+    {
+        var panel = new WrapPanel();
+        if (string.IsNullOrWhiteSpace(tagsStr)) return panel;
+
+        var tags = tagsStr.Split(',',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var tag in tags)
+        {
+            var chip = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(0xE8, 0xF4, 0xFF)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0xB3, 0xD9, 0xF5)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(5, 1, 5, 1),
+                Margin = new Thickness(0, 0, 4, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            chip.Child = new TextBlock
+            {
+                Text = tag,
+                FontSize = fontSize,
+                FontFamily = new FontFamily("Microsoft JhengHei UI, Segoe UI"),
+                Foreground = new SolidColorBrush(Color.FromRgb(0x00, 0x78, 0xD4))
+            };
+            panel.Children.Add(chip);
+        }
+        return panel;
+    }
+
+    private static bool IsDescendantOf(DependencyObject? child, DependencyObject parent)
+    {
+        while (child != null)
+        {
+            if (child == parent) return true;
+            child = VisualTreeHelper.GetParent(child);
+        }
+        return false;
+    }
+
+    private string FormatBrowseDateLabel(DiaryEntry entry)
+    {
+        var day = GetChineseDayOfWeek(entry.Date.DayOfWeek);
+        var today = entry.Date.Date == DateTime.Today ? "　（今天）" : string.Empty;
+        return $"{entry.Date:yyyy年M月d日}　{day}{today}";
+    }
+
+    // ════════════════════════════════════════
+    // 標籤列（編輯模式）
+    // ════════════════════════════════════════
+
+    private void RefreshTagsBar()
+    {
+        TagsWrapPanel.Children.Clear();
+
+        // 「標籤：」label
+        TagsWrapPanel.Children.Add(new TextBlock
+        {
+            Text = "標籤：",
+            Foreground = new SolidColorBrush(Color.FromRgb(0x9E, 0xA3, 0xA8)),
+            FontSize = 12,
+            FontFamily = new FontFamily("Microsoft JhengHei UI, Segoe UI"),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 4, 0)
+        });
+
+        // 現有標籤 chip
+        foreach (var tag in _currentTags.ToList())
+        {
+            var captured = tag;
+            var chip = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(0xE8, 0xF4, 0xFF)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0x00, 0x78, 0xD4)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(6, 2, 2, 2),
+                Margin = new Thickness(0, 0, 4, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var chipContent = new StackPanel { Orientation = Orientation.Horizontal };
+            chipContent.Children.Add(new TextBlock
+            {
+                Text = captured,
+                FontSize = 11,
+                FontFamily = new FontFamily("Microsoft JhengHei UI, Segoe UI"),
+                Foreground = new SolidColorBrush(Color.FromRgb(0x00, 0x78, 0xD4)),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 2, 0)
+            });
+
+            var removeBtn = new Button
+            {
+                Content = "×",
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Foreground = new SolidColorBrush(Color.FromRgb(0x00, 0x78, 0xD4)),
+                FontSize = 12,
+                Padding = new Thickness(2, 0, 3, 0),
+                Cursor = Cursors.Hand,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            removeBtn.Click += async (_, _) =>
+            {
+                _currentTags.Remove(captured);
+                await SaveCurrentTagsAsync();
+                RefreshTagsBar();
+            };
+            chipContent.Children.Add(removeBtn);
+            chip.Child = chipContent;
+            TagsWrapPanel.Children.Add(chip);
+        }
+
+        // 輸入框容器
+        TagsWrapPanel.Children.Add(_tagInputContainer);
+
+        // 顯示/隱藏 placeholder
+        _tagInputPlaceholder.Visibility = string.IsNullOrEmpty(_tagInputBox.Text)
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void TagInputBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter || e.Key == Key.OemComma)
+        {
+            await CommitTagInputAsync();
+            e.Handled = true;
+        }
+    }
+
+    private async Task CommitTagInputAsync()
+    {
+        var text = _tagInputBox.Text.Trim().TrimEnd(',');
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        if (!_currentTags.Contains(text, StringComparer.OrdinalIgnoreCase))
+        {
+            _currentTags.Add(text);
+            await SaveCurrentTagsAsync();
+        }
+        _tagInputBox.Text = string.Empty;
+        _tagInputPlaceholder.Visibility = Visibility.Visible;
+        RefreshTagsBar();
+    }
+
+    private async Task SaveCurrentTagsAsync()
+    {
+        var tagsStr = string.Join(",", _currentTags);
+        // 若 entry 不存在且有 tags，先建立記錄
+        var entry = await _diaryService.GetEntryAsync(_currentDate);
+        if (entry == null && _currentTags.Count > 0)
+            await _diaryService.GetOrCreateEntryAsync(_currentDate);
+        await _diaryService.SaveTagsAsync(_currentDate, tagsStr);
     }
 
     // ════════════════════════════════════════
@@ -88,6 +531,7 @@ public partial class MainWindow : Window
     private async Task NavigateToDateAsync(DateTime date)
     {
         _autoSaveTimer.Stop();
+        await CommitTagInputAsync();
         await _diaryService.SaveContentAsync(_currentDate, GetEditorText());
 
         _currentDate = date;
@@ -142,6 +586,7 @@ public partial class MainWindow : Window
             EditorGrid.Visibility     = Visibility.Collapsed;
             WordCountBar.Visibility   = Visibility.Collapsed;
             AttachmentArea.Visibility = Visibility.Collapsed;
+            TagsBar.Visibility        = Visibility.Collapsed;
             EditorRow.Height          = GridLength.Auto;
             AttachmentRow.Height      = GridLength.Auto;
             CollapseChevron.Text      = "▶";
@@ -151,6 +596,7 @@ public partial class MainWindow : Window
             EditorGrid.Visibility     = Visibility.Visible;
             WordCountBar.Visibility   = Visibility.Visible;
             AttachmentArea.Visibility = Visibility.Visible;
+            TagsBar.Visibility        = Visibility.Visible;
             EditorRow.Height          = new GridLength(1, GridUnitType.Star);
             AttachmentRow.Height      = new GridLength(220, GridUnitType.Pixel);
             CollapseChevron.Text      = "▼";
@@ -166,7 +612,6 @@ public partial class MainWindow : Window
         var isPinned = PinButton.Tag as bool? ?? false;
         var newPinned = !isPinned;
 
-        // 確保 DB 記錄存在才能更新 IsPinned
         var entry = await _diaryService.GetEntryAsync(_currentDate);
         if (entry == null)
             await _diaryService.GetOrCreateEntryAsync(_currentDate);
@@ -180,8 +625,8 @@ public partial class MainWindow : Window
         PinButton.Tag      = pinned;
         PinButton.Content  = pinned ? "★" : "☆";
         PinButton.Foreground = pinned
-            ? new SolidColorBrush(Color.FromRgb(0xFF, 0xB9, 0x00))  // 金色
-            : new SolidColorBrush(Color.FromRgb(0xC0, 0xC4, 0xCC)); // 灰色
+            ? new SolidColorBrush(Color.FromRgb(0xFF, 0xB9, 0x00))
+            : new SolidColorBrush(Color.FromRgb(0xC0, 0xC4, 0xCC));
         PinButton.ToolTip = pinned ? "取消置頂" : "置頂此日記";
     }
 
@@ -252,8 +697,31 @@ public partial class MainWindow : Window
             SearchResultsPopup.IsOpen = false;
             SearchBox.Text = string.Empty;
             SearchPlaceholder.Visibility = Visibility.Visible;
+
+            // 若在瀏覽模式，先切回編輯模式
+            if (_isBrowseMode)
+                await ModeToggleSwitchToEditAsync();
+
             await NavigateToDateAsync(result.Date);
         }
+    }
+
+    private async Task ModeToggleSwitchToEditAsync()
+    {
+        _isBrowseMode = false;
+        BrowseScrollViewer.Visibility = Visibility.Collapsed;
+
+        var editBorder = ((Grid)Content).Children
+            .OfType<Border>().First(b => (int)(b.GetValue(Grid.RowProperty)) == 1);
+        editBorder.Visibility = Visibility.Visible;
+
+        var attachBorder = ((Grid)Content).Children
+            .OfType<Border>().First(b => (int)(b.GetValue(Grid.RowProperty)) == 2);
+        attachBorder.Visibility = Visibility.Visible;
+
+        NavButtonsPanel.Visibility = Visibility.Visible;
+        ModeToggleButton.Content = "📋  瀏覽模式";
+        await Task.CompletedTask;
     }
 
     private static string ExtractPreview(string content, string keyword)
@@ -279,6 +747,13 @@ public partial class MainWindow : Window
         var entry = await _diaryService.GetEntryAsync(date);
         SetEditorText(entry?.Content ?? string.Empty);
         UpdatePinButton(entry?.IsPinned ?? false);
+
+        // 載入標籤
+        _currentTags = string.IsNullOrWhiteSpace(entry?.Tags)
+            ? new List<string>()
+            : entry.Tags.Split(',',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        RefreshTagsBar();
 
         // 還原此日期的折疊狀態
         var collapsed = _collapsedDates.TryGetValue(date, out var c) && c;
@@ -307,6 +782,7 @@ public partial class MainWindow : Window
     protected override async void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
         _autoSaveTimer.Stop();
+        await CommitTagInputAsync();
         await _diaryService.SaveContentAsync(_currentDate, GetEditorText());
         _calendarWindow.Close();
         _db.Dispose();

@@ -70,6 +70,24 @@ public class DiaryService
         }
     }
 
+    /// <summary>瀏覽模式：取所有日誌，置頂優先，日期降冪。</summary>
+    public async Task<List<DiaryEntry>> GetAllEntriesAsync()
+    {
+        return await _db.DiaryEntries
+            .OrderByDescending(e => e.IsPinned)
+            .ThenByDescending(e => e.Date)
+            .AsNoTracking()
+            .ToListAsync();
+    }
+
+    /// <summary>儲存標籤字串。</summary>
+    public async Task SaveTagsAsync(DateTime date, string tags)
+    {
+        await _db.DiaryEntries
+            .Where(e => e.Date == date.Date)
+            .ExecuteUpdateAsync(s => s.SetProperty(e => e.Tags, tags));
+    }
+
     /// <summary>切換置頂狀態。</summary>
     public async Task SetPinnedAsync(DateTime date, bool pinned)
     {
