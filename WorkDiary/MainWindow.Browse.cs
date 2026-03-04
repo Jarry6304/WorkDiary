@@ -26,7 +26,8 @@ public partial class MainWindow
         }
         else
         {
-            entries = await _diaryService.SearchForBrowseAsync(keyword);
+            // Phase 3-C：混合語意搜尋（模型未就緒時自動降級為 LIKE）
+            entries = await HybridSearchAsync(keyword!, takeLimit: 0);
 
             BrowseEntriesPanel.Children.Add(new Border
             {

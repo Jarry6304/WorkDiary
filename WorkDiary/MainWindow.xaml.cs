@@ -180,6 +180,29 @@ public partial class MainWindow : Window
     }
 
     // ════════════════════════════════════════
+    // Phase 3-B：即時索引更新
+    // ════════════════════════════════════════
+
+    internal async Task UpdateEmbeddingForCurrentDateAsync(string content)
+    {
+        try
+        {
+            var entry = await _diaryService.GetEntryAsync(_currentDate);
+            if (entry == null) return;
+
+            var embedding = _embeddingService.GetEmbedding(content);
+            _vectorStore.Upsert(entry.Id, embedding);
+
+            using var bgDb = new AppDbContext();
+            await _vectorStore.PersistAsync(entry.Id, embedding, bgDb);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Embedding] 更新失敗: {ex.Message}");
+        }
+    }
+
+    // ════════════════════════════════════════
     // 面板模式切換
     // ════════════════════════════════════════
 

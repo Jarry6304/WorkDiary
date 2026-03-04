@@ -195,14 +195,23 @@ public class EmbeddingService : IDisposable
         return (ids, mask, typeIds);
     }
 
+    /// <summary>僅保留繁/簡中文、英文、數字、空白及標點；過濾其他語言字元。</summary>
+    private static bool IsKeepChar(char c) =>
+        (c >= 'a' && c <= 'z') ||
+        (c >= '0' && c <= '9') ||
+        char.IsWhiteSpace(c)   ||
+        IsChineseChar(c)       ||
+        IsPunctuation(c);
+
     private List<string> BasicTokenize(string text)
     {
         text = text.ToLowerInvariant();
 
-        // 中日韓字元前後插入空格
+        // 中日韓字元前後插入空格，同時過濾不支援的字元集
         var sb = new StringBuilder(text.Length * 2);
         foreach (char c in text)
         {
+            if (!IsKeepChar(c)) continue;
             if (IsChineseChar(c)) sb.Append(' ').Append(c).Append(' ');
             else sb.Append(c);
         }

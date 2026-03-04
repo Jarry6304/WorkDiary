@@ -158,7 +158,11 @@ public partial class MainWindow
     private async void AutoSaveTimer_Tick(object? sender, EventArgs e)
     {
         _autoSaveTimer.Stop();
-        await _diaryService.SaveContentAsync(_currentDate, GetEditorText());
+        var text = GetEditorText();
+        await _diaryService.SaveContentAsync(_currentDate, text);
+        // Phase 3-B：自動更新語意向量（非同步，不阻塞 UI）
+        if (_embeddingService.IsReady && !string.IsNullOrWhiteSpace(text))
+            _ = UpdateEmbeddingForCurrentDateAsync(text);
     }
 
     protected override async void OnClosing(System.ComponentModel.CancelEventArgs e)

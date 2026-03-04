@@ -210,6 +210,17 @@ public class DiaryService
             .ExecuteUpdateAsync(s => s.SetProperty(e => e.Embedding, embedding));
     }
 
+    /// <summary>依 ID 清單批次取得日誌（含附件）。</summary>
+    public async Task<List<DiaryEntry>> GetEntriesByIdsAsync(IEnumerable<int> ids)
+    {
+        var idSet = ids.ToList();
+        return await _db.DiaryEntries
+            .Include(e => e.Attachments)
+            .Where(e => idSet.Contains(e.Id))
+            .AsNoTracking()
+            .ToListAsync();
+    }
+
     /// <summary>取得尚未建立語意向量的日誌清單（Id + 內容）。</summary>
     public async Task<List<(int Id, string Content)>> GetEntriesWithoutEmbeddingAsync()
     {

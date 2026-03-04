@@ -11,6 +11,8 @@ public class VectorStoreService
 {
     private readonly Dictionary<int, float[]> _store = new();
 
+    public int Count => _store.Count;
+
     // ── 載入 ──
 
     public async Task LoadAllAsync(AppDbContext db)
