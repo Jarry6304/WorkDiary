@@ -298,12 +298,9 @@ public class EmbeddingService : IDisposable
     }
 
     private static bool IsChineseChar(char c) =>
-        (c >= '\u4E00' && c <= '\u9FFF') ||
-        (c >= '\u3400' && c <= '\u4DBF') ||
-        (c >= '\uF900' && c <= '\uFAFF') ||
-        (c >= '\u2F800' && c <= '\u2FA1F') ||
-        (c >= '\u3040' && c <= '\u30FF') ||   // 平假名 / 片假名
-        (c >= '\uFF65' && c <= '\uFF9F');      // 半形片假名
+        (c >= '\u4E00' && c <= '\u9FFF') ||   // CJK 統一漢字
+        (c >= '\u3400' && c <= '\u4DBF') ||   // CJK 擴充 A
+        (c >= '\uF900' && c <= '\uFAFF');     // CJK 相容漢字
 
     private static bool IsPunctuation(char c)
     {
