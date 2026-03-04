@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using WorkDiary.Data;
 using WorkDiary.Models;
@@ -34,6 +35,12 @@ public partial class MainWindow : Window
 
     // ── 面板模式 ──
     private bool _isBrowseMode = false;
+
+    // ── 模式底色 ──
+    private static readonly SolidColorBrush EditModeBg =
+        new(Color.FromRgb(0xEB, 0xF9, 0xEF));   // 淡綠 #EBF9EF
+    private static readonly SolidColorBrush BrowseModeBg =
+        new(Color.FromRgb(0xEB, 0xF0, 0xFB));   // 淡藍 #EBF0FB
 
     // ── 標籤管理 ──
     private List<string> _currentTags = new();
@@ -101,6 +108,9 @@ public partial class MainWindow : Window
         _tagInputContainer.Children.Add(_tagInputBox);
         _tagInputContainer.Children.Add(_tagInputPlaceholder);
 
+        // 初始為編輯模式底色
+        Background = EditModeBg;
+
         UpdateCalendarButton(DateTime.Today);
         UpdateDateHeader(DateTime.Today);
         UpdatePlaceholderVisibility();
@@ -116,62 +126,191 @@ public partial class MainWindow : Window
     private async void ModeToggleButton_Click(object sender, RoutedEventArgs e)
     {
         if (_isBrowseMode)
-        {
-            // 切回編輯模式
-            _isBrowseMode = false;
-            BrowseScrollViewer.Visibility = Visibility.Collapsed;
-
-            // 恢復編輯相關控件
-            var editBorder = (Border)((Grid)Content).Children
-                .OfType<Border>().First(b => (int)(b.GetValue(Grid.RowProperty)) == 1);
-            editBorder.Visibility = Visibility.Visible;
-
-            var attachBorder = (Border)((Grid)Content).Children
-                .OfType<Border>().First(b => (int)(b.GetValue(Grid.RowProperty)) == 2);
-            attachBorder.Visibility = Visibility.Visible;
-
-            NavButtonsPanel.Visibility = Visibility.Visible;
-            ModeToggleButton.Content = "📋  瀏覽模式";
-
-            await LoadEntryForDateAsync(_currentDate);
-        }
+            await SwitchToEditModeAsync();
         else
+            await SwitchToBrowseModeAsync();
+    }
+
+    private async Task SwitchToBrowseModeAsync(string? searchKeyword = null)
+    {
+        await CommitTagInputAsync();
+        _isBrowseMode = true;
+
+        EditAreaBorder.Visibility  = Visibility.Collapsed;
+        AttachmentArea.Visibility  = Visibility.Collapsed;
+        BrowseScrollViewer.Visibility = Visibility.Visible;
+        NavButtonsPanel.Visibility = Visibility.Collapsed;
+        ModeToggleButton.Content   = "✏️  編輯模式";
+
+        // 瀏覽模式底色：淡藍
+        Background = BrowseModeBg;
+        BrowseScrollViewer.Background = new SolidColorBrush(Color.FromRgb(0xF5, 0xF8, 0xFF));
+
+        await LoadBrowsePanelAsync(searchKeyword);
+    }
+
+    private async Task SwitchToEditModeAsync()
+    {
+        _isBrowseMode = false;
+
+        EditAreaBorder.Visibility  = Visibility.Visible;
+        AttachmentArea.Visibility  = Visibility.Visible;
+        BrowseScrollViewer.Visibility = Visibility.Collapsed;
+        NavButtonsPanel.Visibility = Visibility.Visible;
+        ModeToggleButton.Content   = "📋  瀏覽模式";
+
+        // 編輯模式底色：淡綠
+        Background = EditModeBg;
+
+        await LoadEntryForDateAsync(_currentDate);
+    }
+
+    // ════════════════════════════════════════
+    // 搜尋
+    // ════════════════════════════════════════
+
+    private async void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        var keyword = SearchBox.Text;
+        SearchPlaceholder.Visibility =
+            string.IsNullOrEmpty(keyword) ? Visibility.Visible : Visibility.Collapsed;
+
+        if (keyword.Length < 2)
         {
-            // 切換到瀏覽模式
-            await CommitTagInputAsync();
-            _isBrowseMode = true;
-
-            var editBorder = (Border)((Grid)Content).Children
-                .OfType<Border>().First(b => (int)(b.GetValue(Grid.RowProperty)) == 1);
-            editBorder.Visibility = Visibility.Collapsed;
-
-            var attachBorder = (Border)((Grid)Content).Children
-                .OfType<Border>().First(b => (int)(b.GetValue(Grid.RowProperty)) == 2);
-            attachBorder.Visibility = Visibility.Collapsed;
-
-            BrowseScrollViewer.Visibility = Visibility.Visible;
-            NavButtonsPanel.Visibility = Visibility.Collapsed;
-            ModeToggleButton.Content = "✏️  編輯模式";
-
-            await LoadBrowsePanelAsync();
+            SearchResultsPopup.IsOpen = false;
+            return;
         }
+
+        var results = await _diaryService.SearchAsync(keyword);
+        if (results.Count == 0)
+        {
+            SearchResultsPopup.IsOpen = false;
+            return;
+        }
+
+        SearchResultsListBox.ItemsSource = results
+            .Select(r => new SearchResultItem
+            {
+                Date     = r.Date,
+                IsPinned = r.IsPinned,
+                Preview  = ExtractPreview(r.Content, keyword)
+            })
+            .ToList();
+
+        SearchResultsPopup.IsOpen = true;
+    }
+
+    private async void SearchBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            // Enter → 全文搜尋並切換至瀏覽模式
+            await ExecuteFullSearchAsync();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            SearchBox.Text = string.Empty;
+            SearchResultsPopup.IsOpen = false;
+        }
+        else if (e.Key == Key.Down && SearchResultsPopup.IsOpen
+                 && SearchResultsListBox.Items.Count > 0)
+        {
+            SearchResultsListBox.Focus();
+            SearchResultsListBox.SelectedIndex = 0;
+            e.Handled = true;
+        }
+    }
+
+    private async void SearchButton_Click(object sender, RoutedEventArgs e)
+        => await ExecuteFullSearchAsync();
+
+    private async Task ExecuteFullSearchAsync()
+    {
+        var keyword = SearchBox.Text.Trim();
+        SearchResultsPopup.IsOpen = false;
+        // 切換到瀏覽模式，帶搜尋關鍵字
+        await SwitchToBrowseModeAsync(string.IsNullOrWhiteSpace(keyword) ? null : keyword);
+    }
+
+    private void SearchBox_GotFocus(object sender, RoutedEventArgs e)
+        => SearchPlaceholder.Visibility = Visibility.Collapsed;
+
+    private void SearchBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrEmpty(SearchBox.Text))
+            SearchPlaceholder.Visibility = Visibility.Visible;
+    }
+
+    private async void SearchResult_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (SearchResultsListBox.SelectedItem is SearchResultItem result)
+        {
+            SearchResultsPopup.IsOpen = false;
+            SearchBox.Text = string.Empty;
+            SearchPlaceholder.Visibility = Visibility.Visible;
+
+            // 若在瀏覽模式，先切回編輯模式
+            if (_isBrowseMode)
+                await SwitchToEditModeAsync();
+
+            await NavigateToDateAsync(result.Date);
+        }
+    }
+
+    private static string ExtractPreview(string content, string keyword)
+    {
+        if (string.IsNullOrEmpty(content)) return string.Empty;
+        var idx = content.IndexOf(keyword, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
+            return content.Length > 60 ? content[..60] + "…" : content;
+        var start   = Math.Max(0, idx - 20);
+        var end     = Math.Min(content.Length, idx + keyword.Length + 40);
+        var snippet = content[start..end];
+        if (start > 0)            snippet = "…" + snippet;
+        if (end < content.Length) snippet += "…";
+        return snippet;
     }
 
     // ════════════════════════════════════════
     // 瀏覽面板
     // ════════════════════════════════════════
 
-    private async Task LoadBrowsePanelAsync()
+    private async Task LoadBrowsePanelAsync(string? keyword = null)
     {
         BrowseEntriesPanel.Children.Clear();
 
-        var entries = await _diaryService.GetAllEntriesAsync();
+        List<DiaryEntry> entries;
+        if (string.IsNullOrWhiteSpace(keyword))
+        {
+            entries = await _diaryService.GetAllEntriesAsync();
+        }
+        else
+        {
+            entries = await _diaryService.SearchForBrowseAsync(keyword);
+
+            // 顯示搜尋標題列
+            BrowseEntriesPanel.Children.Add(new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(0xE8, 0xF4, 0xFF)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0xB3, 0xD9, 0xF5)),
+                BorderThickness = new Thickness(0, 0, 0, 1),
+                Padding = new Thickness(16, 8, 16, 8),
+                Child = new TextBlock
+                {
+                    Text = $"🔍  搜尋「{keyword}」：共 {entries.Count} 筆結果",
+                    FontSize = 13,
+                    FontFamily = new FontFamily("Microsoft JhengHei UI, Segoe UI"),
+                    Foreground = new SolidColorBrush(Color.FromRgb(0x00, 0x5A, 0x9E))
+                }
+            });
+        }
 
         if (entries.Count == 0)
         {
             BrowseEntriesPanel.Children.Add(new TextBlock
             {
-                Text = "尚無日誌記錄",
+                Text = string.IsNullOrWhiteSpace(keyword) ? "尚無日誌記錄" : "找不到符合的日誌",
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Foreground = new SolidColorBrush(Color.FromRgb(0x9E, 0xA3, 0xA8)),
                 Margin = new Thickness(0, 48, 0, 0),
@@ -198,10 +337,9 @@ public partial class MainWindow : Window
         outer.Child = outerStack;
 
         // ── 標題列 ──
-        var headerBg = new SolidColorBrush(Color.FromRgb(0xFA, 0xFA, 0xFA));
         var headerBorder = new Border
         {
-            Background = headerBg,
+            Background = new SolidColorBrush(Color.FromRgb(0xFA, 0xFA, 0xFA)),
             Padding = new Thickness(12, 10, 12, 10),
             Cursor = Cursors.Hand
         };
@@ -258,6 +396,22 @@ public partial class MainWindow : Window
         DockPanel.SetDock(tagChips, Dock.Left);
         dock.Children.Add(tagChips);
 
+        // 附件數量提示（標題列右側）
+        if (entry.Attachments is { Count: > 0 })
+        {
+            var attachHint = new TextBlock
+            {
+                Text = $"📎 {entry.Attachments.Count}",
+                FontSize = 11,
+                FontFamily = new FontFamily("Microsoft JhengHei UI, Segoe UI"),
+                Foreground = new SolidColorBrush(Color.FromRgb(0x9E, 0xA3, 0xA8)),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(8, 0, 0, 0)
+            };
+            DockPanel.SetDock(attachHint, Dock.Left);
+            dock.Children.Add(attachHint);
+        }
+
         // ── 展開內容區 ──
         var contentBorder = new Border
         {
@@ -275,10 +429,8 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(entry.Tags))
         {
             var labelsPanel = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
-            var tags = entry.Tags.Split(',',
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-            foreach (var tag in tags)
+            foreach (var tag in entry.Tags.Split(',',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
                 var chip = new Border
                 {
@@ -313,8 +465,21 @@ public partial class MainWindow : Window
                 ? new SolidColorBrush(Color.FromRgb(0xC0, 0xC4, 0xCC))
                 : new SolidColorBrush(Color.FromRgb(0x24, 0x29, 0x2E)),
             TextWrapping = TextWrapping.Wrap,
-            LineHeight = 22
+            LineHeight = 22,
+            Margin = new Thickness(0, 0, 0, entry.Attachments?.Count > 0 ? 12 : 0)
         });
+
+        // ── 附件預覽區 ──
+        if (entry.Attachments is { Count: > 0 })
+        {
+            contentStack.Children.Add(new Border
+            {
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0xE1, 0xE4, 0xE8)),
+                BorderThickness = new Thickness(0, 1, 0, 0),
+                Padding = new Thickness(0, 10, 0, 0),
+                Child = BuildAttachmentsSection(entry.Attachments)
+            });
+        }
 
         outerStack.Children.Add(headerBorder);
         outerStack.Children.Add(contentBorder);
@@ -322,7 +487,6 @@ public partial class MainWindow : Window
         // ── 展開/折疊事件 ──
         headerBorder.MouseLeftButtonUp += (_, e) =>
         {
-            // 若點擊來源是 pinBtn 的子元素，不觸發展開
             if (IsDescendantOf(e.OriginalSource as DependencyObject, pinBtn)) return;
 
             var expanding = contentBorder.Visibility == Visibility.Collapsed;
@@ -341,11 +505,132 @@ public partial class MainWindow : Window
             if (dbEntry == null) await _diaryService.GetOrCreateEntryAsync(entry.Date);
             await _diaryService.SetPinnedAsync(entry.Date, newPinned);
             entry.IsPinned = newPinned;
-            // 重新整理清單（重新排序）
             await LoadBrowsePanelAsync();
         };
 
         return outer;
+    }
+
+    private StackPanel BuildAttachmentsSection(IEnumerable<FileAttachment> attachments)
+    {
+        var panel = new StackPanel();
+
+        // 附件區標題
+        panel.Children.Add(new TextBlock
+        {
+            Text = "📎  附件",
+            FontSize = 12,
+            FontWeight = FontWeights.SemiBold,
+            FontFamily = new FontFamily("Microsoft JhengHei UI, Segoe UI"),
+            Foreground = new SolidColorBrush(Color.FromRgb(0x24, 0x29, 0x2E)),
+            Margin = new Thickness(0, 0, 0, 6)
+        });
+
+        // 圖片縮圖列（先收集圖片）
+        var images = attachments
+            .Where(a => a.Extension is ".jpg" or ".jpeg" or ".png")
+            .ToList();
+
+        if (images.Count > 0)
+        {
+            var imgPanel = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
+            foreach (var img in images)
+            {
+                var fullPath = _fileService.GetFullPath(img.RelativePath);
+                if (!File.Exists(fullPath)) continue;
+
+                try
+                {
+                    var bmp = new BitmapImage();
+                    bmp.BeginInit();
+                    bmp.UriSource = new Uri(fullPath);
+                    bmp.DecodePixelWidth = 80;
+                    bmp.CacheOption = BitmapCacheOption.OnLoad;
+                    bmp.EndInit();
+
+                    var imgCtrl = new System.Windows.Controls.Image
+                    {
+                        Source = bmp,
+                        Width = 80,
+                        Height = 60,
+                        Stretch = Stretch.UniformToFill,
+                        Margin = new Thickness(0, 0, 6, 4),
+                        Cursor = Cursors.Hand,
+                        ToolTip = img.FileName,
+                        Clip = new RectangleGeometry(new Rect(0, 0, 80, 60), 4, 4)
+                    };
+                    var captured = img;
+                    imgCtrl.MouseLeftButtonUp += (_, _) => OpenFileAttachment(captured);
+                    imgPanel.Children.Add(imgCtrl);
+                }
+                catch { /* 圖片載入失敗，跳過 */ }
+            }
+            if (imgPanel.Children.Count > 0)
+                panel.Children.Add(imgPanel);
+        }
+
+        // 非圖片附件清單
+        foreach (var att in attachments)
+        {
+            var captured = att;
+            var row = new Border
+            {
+                Padding = new Thickness(6, 4, 6, 4),
+                CornerRadius = new CornerRadius(4),
+                Margin = new Thickness(0, 0, 0, 2),
+                Cursor = Cursors.Hand,
+                Background = Brushes.Transparent
+            };
+            row.MouseEnter += (_, _) =>
+                row.Background = new SolidColorBrush(Color.FromRgb(0xF5, 0xF5, 0xF5));
+            row.MouseLeave += (_, _) =>
+                row.Background = Brushes.Transparent;
+            row.MouseLeftButtonUp += (_, _) => OpenFileAttachment(captured);
+
+            var rowDock = new DockPanel { LastChildFill = true };
+            rowDock.Children.Add(new TextBlock
+            {
+                Text = GetFileIcon(att.Extension),
+                FontSize = 16,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 6, 0)
+            });
+            DockPanel.SetDock(rowDock.Children[0], Dock.Left);
+
+            var sizeText = new TextBlock
+            {
+                Text = FormatFileSize(att.FileSizeBytes),
+                FontSize = 11,
+                FontFamily = new FontFamily("Microsoft JhengHei UI, Segoe UI"),
+                Foreground = new SolidColorBrush(Color.FromRgb(0x9E, 0xA3, 0xA8)),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(8, 0, 0, 0)
+            };
+            DockPanel.SetDock(sizeText, Dock.Right);
+            rowDock.Children.Add(sizeText);
+
+            rowDock.Children.Add(new TextBlock
+            {
+                Text = att.FileName,
+                FontSize = 13,
+                FontFamily = new FontFamily("Microsoft JhengHei UI, Segoe UI"),
+                Foreground = new SolidColorBrush(Color.FromRgb(0x24, 0x29, 0x2E)),
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+
+            row.Child = rowDock;
+            panel.Children.Add(row);
+        }
+
+        return panel;
+    }
+
+    private void OpenFileAttachment(FileAttachment att)
+    {
+        var fullPath = _fileService.GetFullPath(att.RelativePath);
+        if (File.Exists(fullPath))
+            Process.Start(new ProcessStartInfo(fullPath) { UseShellExecute = true });
     }
 
     private static WrapPanel BuildTagChipsPanel(string tagsStr, double fontSize)
@@ -353,9 +638,8 @@ public partial class MainWindow : Window
         var panel = new WrapPanel();
         if (string.IsNullOrWhiteSpace(tagsStr)) return panel;
 
-        var tags = tagsStr.Split(',',
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var tag in tags)
+        foreach (var tag in tagsStr.Split(',',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             var chip = new Border
             {
@@ -404,7 +688,6 @@ public partial class MainWindow : Window
     {
         TagsWrapPanel.Children.Clear();
 
-        // 「標籤：」label
         TagsWrapPanel.Children.Add(new TextBlock
         {
             Text = "標籤：",
@@ -415,7 +698,6 @@ public partial class MainWindow : Window
             Margin = new Thickness(0, 0, 4, 0)
         });
 
-        // 現有標籤 chip
         foreach (var tag in _currentTags.ToList())
         {
             var captured = tag;
@@ -462,10 +744,7 @@ public partial class MainWindow : Window
             TagsWrapPanel.Children.Add(chip);
         }
 
-        // 輸入框容器
         TagsWrapPanel.Children.Add(_tagInputContainer);
-
-        // 顯示/隱藏 placeholder
         _tagInputPlaceholder.Visibility = string.IsNullOrEmpty(_tagInputBox.Text)
             ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -497,7 +776,6 @@ public partial class MainWindow : Window
     private async Task SaveCurrentTagsAsync()
     {
         var tagsStr = string.Join(",", _currentTags);
-        // 若 entry 不存在且有 tags，先建立記錄
         var entry = await _diaryService.GetEntryAsync(_currentDate);
         if (entry == null && _currentTags.Count > 0)
             await _diaryService.GetOrCreateEntryAsync(_currentDate);
@@ -628,114 +906,6 @@ public partial class MainWindow : Window
             ? new SolidColorBrush(Color.FromRgb(0xFF, 0xB9, 0x00))
             : new SolidColorBrush(Color.FromRgb(0xC0, 0xC4, 0xCC));
         PinButton.ToolTip = pinned ? "取消置頂" : "置頂此日記";
-    }
-
-    // ════════════════════════════════════════
-    // 搜尋
-    // ════════════════════════════════════════
-
-    private async void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
-    {
-        var keyword = SearchBox.Text;
-        SearchPlaceholder.Visibility =
-            string.IsNullOrEmpty(keyword) ? Visibility.Visible : Visibility.Collapsed;
-
-        if (keyword.Length < 2)
-        {
-            SearchResultsPopup.IsOpen = false;
-            return;
-        }
-
-        var results = await _diaryService.SearchAsync(keyword);
-        if (results.Count == 0)
-        {
-            SearchResultsPopup.IsOpen = false;
-            return;
-        }
-
-        SearchResultsListBox.ItemsSource = results
-            .Select(r => new SearchResultItem
-            {
-                Date    = r.Date,
-                IsPinned = r.IsPinned,
-                Preview = ExtractPreview(r.Content, keyword)
-            })
-            .ToList();
-
-        SearchResultsPopup.IsOpen = true;
-    }
-
-    private void SearchBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Escape)
-        {
-            SearchBox.Text = string.Empty;
-            SearchResultsPopup.IsOpen = false;
-        }
-        else if (e.Key == Key.Down && SearchResultsPopup.IsOpen
-                 && SearchResultsListBox.Items.Count > 0)
-        {
-            SearchResultsListBox.Focus();
-            SearchResultsListBox.SelectedIndex = 0;
-            e.Handled = true;
-        }
-    }
-
-    private void SearchBox_GotFocus(object sender, RoutedEventArgs e)
-        => SearchPlaceholder.Visibility = Visibility.Collapsed;
-
-    private void SearchBox_LostFocus(object sender, RoutedEventArgs e)
-    {
-        if (string.IsNullOrEmpty(SearchBox.Text))
-            SearchPlaceholder.Visibility = Visibility.Visible;
-    }
-
-    private async void SearchResult_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (SearchResultsListBox.SelectedItem is SearchResultItem result)
-        {
-            SearchResultsPopup.IsOpen = false;
-            SearchBox.Text = string.Empty;
-            SearchPlaceholder.Visibility = Visibility.Visible;
-
-            // 若在瀏覽模式，先切回編輯模式
-            if (_isBrowseMode)
-                await ModeToggleSwitchToEditAsync();
-
-            await NavigateToDateAsync(result.Date);
-        }
-    }
-
-    private async Task ModeToggleSwitchToEditAsync()
-    {
-        _isBrowseMode = false;
-        BrowseScrollViewer.Visibility = Visibility.Collapsed;
-
-        var editBorder = ((Grid)Content).Children
-            .OfType<Border>().First(b => (int)(b.GetValue(Grid.RowProperty)) == 1);
-        editBorder.Visibility = Visibility.Visible;
-
-        var attachBorder = ((Grid)Content).Children
-            .OfType<Border>().First(b => (int)(b.GetValue(Grid.RowProperty)) == 2);
-        attachBorder.Visibility = Visibility.Visible;
-
-        NavButtonsPanel.Visibility = Visibility.Visible;
-        ModeToggleButton.Content = "📋  瀏覽模式";
-        await Task.CompletedTask;
-    }
-
-    private static string ExtractPreview(string content, string keyword)
-    {
-        if (string.IsNullOrEmpty(content)) return string.Empty;
-        var idx = content.IndexOf(keyword, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0)
-            return content.Length > 60 ? content[..60] + "…" : content;
-        var start   = Math.Max(0, idx - 20);
-        var end     = Math.Min(content.Length, idx + keyword.Length + 40);
-        var snippet = content[start..end];
-        if (start > 0)             snippet = "…" + snippet;
-        if (end < content.Length)  snippet += "…";
-        return snippet;
     }
 
     // ════════════════════════════════════════
@@ -1071,7 +1241,7 @@ public class SearchResultItem
     {
         get
         {
-            var pin  = IsPinned ? " ★" : string.Empty;
+            var pin   = IsPinned ? " ★" : string.Empty;
             var today = Date.Date == DateTime.Today ? "（今天）" : string.Empty;
             return $"{Date:yyyy-MM-dd}{pin}  {today}";
         }

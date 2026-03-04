@@ -4,7 +4,8 @@
         Title="WorkDiary" Height="780" Width="900"
         MinHeight="600" MinWidth="680"
         WindowStartupLocation="CenterScreen"
-        Background="#F0F2F5">
+        Background="#EBF9EF"
+        x:Name="MainWindowRoot">
 
     <Window.Resources>
         <!-- 透明 Ghost 按鈕 -->
@@ -104,78 +105,87 @@
                         VerticalAlignment="Center"
                         Click="ModeToggleButton_Click"/>
 
-                <!-- 搜尋框（置中）-->
-                <Grid Grid.Column="1"
-                      x:Name="SearchContainer"
-                      HorizontalAlignment="Center"
-                      VerticalAlignment="Center"
-                      Width="280">
-                    <Border Background="#F0F2F5"
-                            CornerRadius="6"
-                            Padding="10,6"
-                            BorderBrush="Transparent"
-                            BorderThickness="1.5">
-                        <Grid>
-                            <TextBox x:Name="SearchBox"
-                                     Background="Transparent"
-                                     BorderThickness="0"
-                                     FontSize="13"
-                                     FontFamily="Microsoft JhengHei UI, Segoe UI"
-                                     VerticalAlignment="Center"
-                                     TextChanged="SearchBox_TextChanged"
-                                     KeyDown="SearchBox_KeyDown"
-                                     GotFocus="SearchBox_GotFocus"
-                                     LostFocus="SearchBox_LostFocus"/>
-                            <TextBlock x:Name="SearchPlaceholder"
-                                       Text="🔍  搜尋記錄關鍵字..."
-                                       Foreground="#B0B5BC"
-                                       FontSize="13"
-                                       FontFamily="Microsoft JhengHei UI, Segoe UI"
-                                       IsHitTestVisible="False"
-                                       VerticalAlignment="Center"/>
-                        </Grid>
-                    </Border>
-
-                    <!-- 搜尋結果 Popup -->
-                    <Popup x:Name="SearchResultsPopup"
-                           PlacementTarget="{Binding ElementName=SearchContainer}"
-                           Placement="Bottom"
-                           StaysOpen="False"
-                           Width="280">
-                        <Border Background="White"
-                                BorderBrush="#D0D5DB"
-                                BorderThickness="1"
-                                CornerRadius="0,0,6,6"
-                                MaxHeight="230">
-                            <ListBox x:Name="SearchResultsListBox"
-                                     BorderThickness="0"
-                                     Background="Transparent"
-                                     SelectionChanged="SearchResult_SelectionChanged">
-                                <ListBox.ItemContainerStyle>
-                                    <Style TargetType="ListBoxItem">
-                                        <Setter Property="Padding" Value="10,6"/>
-                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                                    </Style>
-                                </ListBox.ItemContainerStyle>
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <StackPanel>
-                                            <TextBlock Text="{Binding DateLabel}"
-                                                       FontWeight="SemiBold"
-                                                       FontSize="12"
-                                                       Foreground="#24292E"/>
-                                            <TextBlock Text="{Binding Preview}"
-                                                       Foreground="#9EA3A8"
-                                                       FontSize="11"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       Margin="0,2,0,0"/>
-                                        </StackPanel>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
+                <!-- 搜尋框（置中）+ 搜尋按鈕 -->
+                <StackPanel Grid.Column="1"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Orientation="Horizontal">
+                    <Grid x:Name="SearchContainer" Width="240">
+                        <Border Background="#F0F2F5"
+                                CornerRadius="6"
+                                Padding="10,6"
+                                BorderBrush="Transparent"
+                                BorderThickness="1.5">
+                            <Grid>
+                                <TextBox x:Name="SearchBox"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         FontSize="13"
+                                         FontFamily="Microsoft JhengHei UI, Segoe UI"
+                                         VerticalAlignment="Center"
+                                         TextChanged="SearchBox_TextChanged"
+                                         KeyDown="SearchBox_KeyDown"
+                                         GotFocus="SearchBox_GotFocus"
+                                         LostFocus="SearchBox_LostFocus"/>
+                                <TextBlock x:Name="SearchPlaceholder"
+                                           Text="搜尋標籤 / 內文..."
+                                           Foreground="#B0B5BC"
+                                           FontSize="13"
+                                           FontFamily="Microsoft JhengHei UI, Segoe UI"
+                                           IsHitTestVisible="False"
+                                           VerticalAlignment="Center"/>
+                            </Grid>
                         </Border>
-                    </Popup>
-                </Grid>
+
+                        <!-- 搜尋結果 Popup（快速導覽）-->
+                        <Popup x:Name="SearchResultsPopup"
+                               PlacementTarget="{Binding ElementName=SearchContainer}"
+                               Placement="Bottom"
+                               StaysOpen="False"
+                               Width="240">
+                            <Border Background="White"
+                                    BorderBrush="#D0D5DB"
+                                    BorderThickness="1"
+                                    CornerRadius="0,0,6,6"
+                                    MaxHeight="230">
+                                <ListBox x:Name="SearchResultsListBox"
+                                         BorderThickness="0"
+                                         Background="Transparent"
+                                         SelectionChanged="SearchResult_SelectionChanged">
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="ListBoxItem">
+                                            <Setter Property="Padding" Value="10,6"/>
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding DateLabel}"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="12"
+                                                           Foreground="#24292E"/>
+                                                <TextBlock Text="{Binding Preview}"
+                                                           Foreground="#9EA3A8"
+                                                           FontSize="11"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Margin="0,2,0,0"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Border>
+                        </Popup>
+                    </Grid>
+
+                    <!-- 搜尋按鈕：切換至瀏覽模式並顯示結果 -->
+                    <Button x:Name="SearchButton"
+                            Content="🔍 搜尋"
+                            Style="{StaticResource AccentButton}"
+                            Click="SearchButton_Click"
+                            Margin="6,0,0,0"
+                            ToolTip="全文搜尋並切換至瀏覽模式"/>
+                </StackPanel>
 
                 <!-- 導航按鈕（瀏覽模式下隱藏）-->
                 <StackPanel x:Name="NavButtonsPanel"
@@ -206,6 +216,7 @@
              文字編輯區
              ════════════════════════════════════════ -->
         <Border Grid.Row="1"
+                x:Name="EditAreaBorder"
                 Background="White"
                 BorderBrush="#E1E4E8"
                 BorderThickness="0,0,0,1"

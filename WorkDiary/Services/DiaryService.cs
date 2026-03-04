@@ -70,10 +70,24 @@ public class DiaryService
         }
     }
 
-    /// <summary>瀏覽模式：取所有日誌，置頂優先，日期降冪。</summary>
+    /// <summary>瀏覽模式：取所有日誌（含附件），置頂優先，日期降冪。</summary>
     public async Task<List<DiaryEntry>> GetAllEntriesAsync()
     {
         return await _db.DiaryEntries
+            .Include(e => e.Attachments)
+            .OrderByDescending(e => e.IsPinned)
+            .ThenByDescending(e => e.Date)
+            .AsNoTracking()
+            .ToListAsync();
+    }
+
+    /// <summary>瀏覽模式全文搜尋：搜尋內文 + 標籤，含附件，置頂優先。</summary>
+    public async Task<List<DiaryEntry>> SearchForBrowseAsync(string keyword)
+    {
+        return await _db.DiaryEntries
+            .Include(e => e.Attachments)
+            .Where(e => EF.Functions.Like(e.Content, $"%{keyword}%")
+                     || EF.Functions.Like(e.Tags, $"%{keyword}%"))
             .OrderByDescending(e => e.IsPinned)
             .ThenByDescending(e => e.Date)
             .AsNoTracking()
@@ -113,11 +127,12 @@ public class DiaryService
 
     // ── 搜尋 ──
 
-    /// <summary>全文搜尋，置頂者優先，最多回傳 10 筆。</summary>
+    /// <summary>快速搜尋（Popup 用），搜尋內文 + 標籤，置頂者優先，最多 10 筆。</summary>
     public async Task<List<DiaryEntry>> SearchAsync(string keyword)
     {
         return await _db.DiaryEntries
-            .Where(e => EF.Functions.Like(e.Content, $"%{keyword}%"))
+            .Where(e => EF.Functions.Like(e.Content, $"%{keyword}%")
+                     || EF.Functions.Like(e.Tags, $"%{keyword}%"))
             .OrderByDescending(e => e.IsPinned)
             .ThenByDescending(e => e.Date)
             .Take(10)
