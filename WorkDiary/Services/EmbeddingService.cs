@@ -8,7 +8,7 @@ using System.Text;
 namespace WorkDiary.Services;
 
 /// <summary>
-/// ONNX all-MiniLM-L6-v2 語意向量引擎。
+/// ONNX BAAI/bge-small-zh-v1.5 語意向量引擎（512 維）。
 /// 首次使用時自動從 HuggingFace 下載模型與詞彙表，快取於
 /// %LOCALAPPDATA%\WorkDiary\models\。
 /// </summary>
@@ -20,16 +20,19 @@ public class EmbeddingService : IDisposable
         "WorkDiary", "models");
 
     private static readonly string ModelPath =
-        Path.Combine(ModelsDir, "all-MiniLM-L6-v2.onnx");
+        Path.Combine(ModelsDir, "bge-small-zh-v1.5.onnx");
     private static readonly string VocabPath =
-        Path.Combine(ModelsDir, "all-MiniLM-L6-v2-vocab.txt");
+        Path.Combine(ModelsDir, "bge-small-zh-v1.5-vocab.txt");
 
     private const string ModelUrl =
-        "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx";
+        "https://huggingface.co/BAAI/bge-small-zh-v1.5/resolve/main/onnx/model.onnx";
     private const string VocabUrl =
-        "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/vocab.txt";
+        "https://huggingface.co/BAAI/bge-small-zh-v1.5/resolve/main/vocab.txt";
 
-    private const int MaxSeqLen = 128;
+    private const int MaxSeqLen = 512;
+
+    /// <summary>向量維度（512）。可供外部偵測 DB 中舊維度的 BLOB 是否需重算。</summary>
+    public const int EmbeddingDim = 512;
 
     // ── 狀態 ──
     private InferenceSession?         _session;
@@ -59,7 +62,7 @@ public class EmbeddingService : IDisposable
 
         if (!File.Exists(ModelPath))
         {
-            StatusChanged?.Invoke("正在下載 ONNX 模型（約 22MB）...");
+            StatusChanged?.Invoke("正在下載 ONNX 模型（約 93MB）...");
             await DownloadFileAsync(ModelUrl, ModelPath);
         }
 
@@ -79,7 +82,7 @@ public class EmbeddingService : IDisposable
     // 向量推論
     // ════════════════════════════════════════
 
-    /// <summary>將文字轉換為 384 維 L2 正規化語意向量。</summary>
+    /// <summary>將文字轉換為 512 維 L2 正規化語意向量（CLS Token Pooling）。</summary>
     public float[] GetEmbedding(string text)
     {
         if (!_isReady || _session == null || _vocab == null)
@@ -111,36 +114,24 @@ public class EmbeddingService : IDisposable
         var hidden = results.First(r => r.Name == outputName).AsTensor<float>();
         int dim = (int)hidden.Dimensions[2];
 
-        return MeanPoolAndNormalize(hidden, attentionMask, seqLen, dim);
+        return ClsPoolAndNormalize(hidden, dim);
     }
 
-    // ── Mean Pooling + L2 Normalize ──
+    // ── CLS Token Pooling + L2 Normalize ──
 
-    private static float[] MeanPoolAndNormalize(
-        Tensor<float> hidden, int[] mask, int seqLen, int dim)
+    private static float[] ClsPoolAndNormalize(Tensor<float> hidden, int dim)
     {
-        var pooled = new float[dim];
-        int valid  = 0;
-
-        for (int t = 0; t < seqLen; t++)
-        {
-            if (mask[t] == 0) continue;
-            valid++;
-            for (int d = 0; d < dim; d++)
-                pooled[d] += hidden[0, t, d];
-        }
-
-        if (valid > 0)
-            for (int d = 0; d < dim; d++) pooled[d] /= valid;
+        var vec = new float[dim];
+        for (int d = 0; d < dim; d++) vec[d] = hidden[0, 0, d];
 
         float norm = 0f;
-        for (int d = 0; d < dim; d++) norm += pooled[d] * pooled[d];
+        for (int d = 0; d < dim; d++) norm += vec[d] * vec[d];
         norm = (float)Math.Sqrt(norm);
 
         if (norm > 1e-9f)
-            for (int d = 0; d < dim; d++) pooled[d] /= norm;
+            for (int d = 0; d < dim; d++) vec[d] /= norm;
 
-        return pooled;
+        return vec;
     }
 
     // ════════════════════════════════════════

@@ -159,6 +159,22 @@ public partial class MainWindow : Window
             using var bgDb = new AppDbContext();
             await _vectorStore.LoadAllAsync(bgDb);
 
+            // 清除維度不符的舊 embedding（模型切換後 dim 不相容）
+            int expectedBytes = EmbeddingService.EmbeddingDim * sizeof(float);
+            var stale = await bgDb.DiaryEntries
+                .Where(e => e.Embedding != null && e.Embedding.Length != expectedBytes)
+                .Select(e => new { e.Id })
+                .AsNoTracking()
+                .ToListAsync();
+
+            foreach (var s in stale)
+            {
+                await bgDb.DiaryEntries
+                    .Where(e => e.Id == s.Id)
+                    .ExecuteUpdateAsync(x => x.SetProperty(e => e.Embedding, (byte[]?)null));
+                _vectorStore.Remove(s.Id);
+            }
+
             // 補算尚無向量的日誌
             var pending = await bgDb.DiaryEntries
                 .Where(e => e.Embedding == null && e.Content != string.Empty)
