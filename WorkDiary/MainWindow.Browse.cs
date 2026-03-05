@@ -69,7 +69,8 @@ public partial class MainWindow
         {
             Background = Brushes.White,
             BorderBrush = new SolidColorBrush(Color.FromRgb(0xE1, 0xE4, 0xE8)),
-            BorderThickness = new Thickness(0, 0, 0, 1)
+            BorderThickness = new Thickness(0, 0, 0, 1),
+            Tag = entry.Date
         };
 
         var outerStack = new StackPanel();

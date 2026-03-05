@@ -86,14 +86,32 @@ public partial class MainWindow
     {
         if (SearchResultsListBox.SelectedItem is SearchResultItem result)
         {
+            var keyword = SearchBox.Text;
             SearchResultsPopup.IsOpen = false;
             SearchBox.Text = string.Empty;
             SearchPlaceholder.Visibility = Visibility.Visible;
 
-            if (_isBrowseMode)
-                await SwitchToEditModeAsync();
+            // 切換到（或留在）瀏覽模式，顯示搜尋結果
+            if (!_isBrowseMode)
+                await SwitchToBrowseModeAsync(keyword);
+            else
+                await LoadBrowsePanelAsync(keyword);
 
-            await NavigateToDateAsync(result.Date);
+            // 捲動到選取的條目
+            ScrollToEntryDate(result.Date);
+        }
+    }
+
+    private void ScrollToEntryDate(DateTime date)
+    {
+        foreach (UIElement child in BrowseEntriesPanel.Children)
+        {
+            if (child is System.Windows.Controls.Border b &&
+                b.Tag is DateTime d && d.Date == date.Date)
+            {
+                b.BringIntoView();
+                break;
+            }
         }
     }
 
