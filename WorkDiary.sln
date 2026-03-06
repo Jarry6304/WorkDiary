@@ -5,6 +5,8 @@ VisualStudioVersion = 17.11.35312.102
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WorkDiary", "WorkDiary\WorkDiary.csproj", "{8F4E2B1A-3C7D-4E9F-B2A1-5D8C6F0E3A2B}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WorkDiary.Tests", "WorkDiary.Tests\WorkDiary.Tests.csproj", "{C3D4E5F6-A7B8-9012-CDEF-123456789ABC}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{8F4E2B1A-3C7D-4E9F-B2A1-5D8C6F0E3A2B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8F4E2B1A-3C7D-4E9F-B2A1-5D8C6F0E3A2B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8F4E2B1A-3C7D-4E9F-B2A1-5D8C6F0E3A2B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C3D4E5F6-A7B8-9012-CDEF-123456789ABC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C3D4E5F6-A7B8-9012-CDEF-123456789ABC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C3D4E5F6-A7B8-9012-CDEF-123456789ABC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C3D4E5F6-A7B8-9012-CDEF-123456789ABC}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
