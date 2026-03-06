@@ -25,9 +25,9 @@ public class EmbeddingService : IDisposable
         Path.Combine(ModelsDir, "bge-small-zh-v1.5-vocab.txt");
 
     private const string ModelUrl =
-        "https://huggingface.co/BAAI/bge-small-zh-v1.5/resolve/main/onnx/model.onnx";
+        "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/onnx/model.onnx";
     private const string VocabUrl =
-        "https://huggingface.co/BAAI/bge-small-zh-v1.5/resolve/main/vocab.txt";
+        "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/vocab.txt";
 
     private const int MaxSeqLen = 512;
 
