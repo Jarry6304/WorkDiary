@@ -1,12 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType Condition="'$(TargetFramework)' == 'net8.0-windows'">WinExe</OutputType>
-    <OutputType Condition="'$(TargetFramework)' == 'net8.0'">Library</OutputType>
-    <TargetFrameworks>net8.0-windows;net8.0</TargetFrameworks>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <UseWPF Condition="'$(TargetFramework)' == 'net8.0-windows'">true</UseWPF>
+    <UseWPF>true</UseWPF>
     <AssemblyName>WorkDiary</AssemblyName>
     <RootNamespace>WorkDiary</RootNamespace>
   </PropertyGroup>
@@ -14,19 +13,6 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.*" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.*" />
-  </ItemGroup>
-
-  <!-- 排除 WPF UI 檔案，僅在 net8.0-windows 下編譯 -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
-    <Compile Remove="App.xaml.cs" />
-    <Compile Remove="FloatingCalendarWindow.xaml.cs" />
-    <Compile Remove="MainWindow.xaml.cs" />
-    <Compile Remove="MainWindow.Attachments.cs" />
-    <Compile Remove="MainWindow.Browse.cs" />
-    <Compile Remove="MainWindow.Editor.cs" />
-    <Compile Remove="MainWindow.Search.cs" />
-    <Compile Remove="MainWindow.Tags.cs" />
-    <Compile Remove="MainWindow.Utilities.cs" />
   </ItemGroup>
 
 </Project>
